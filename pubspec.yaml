@@ -44,6 +44,13 @@ dependencies:
   http: ^1.4.0
   dio: ^5.8.0+1
   hidden_drawer_menu: ^3.0.1
+  firebase_core: ^3.15.2
+  firebase_auth: ^5.7.0
+  cloud_firestore: ^5.6.12
+  provider: ^6.1.2
+  google_sign_in: ^6.2.1
+  intl: ^0.19.0
+  url_launcher: ^6.3.0
 
 dev_dependencies:
   flutter_test:

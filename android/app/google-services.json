@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "224888229405",
+    "project_id": "powerpay-5c964",
+    "storage_bucket": "powerpay-5c964.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:224888229405:android:964ba477f4e8fbf29bc0f4",
+        "android_client_info": {
+          "package_name": "com.app.powerpay"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBT-E6FLsKR3SOiH2obq_h2xZjqFWfziEg"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

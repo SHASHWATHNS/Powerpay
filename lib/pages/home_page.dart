@@ -1,158 +1,134 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:powerpay/providers/numlook_providers.dart';
+import 'package:powerpay/pages/recharge_page.dart';
 
-class HomePage extends ConsumerStatefulWidget {
+class HomePage extends StatelessWidget {
   const HomePage({super.key});
 
   @override
-  ConsumerState<HomePage> createState() => _HomePageState();
-}
-
-class _HomePageState extends ConsumerState<HomePage> {
-  final TextEditingController _controller = TextEditingController();
-  String rawNumber = '';
-  String? carrier;
-  bool showIcon = false;
-
-  @override
-  void initState() {
-    super.initState();
-    _controller.addListener(_handleFormat);
-  }
-
-  void _handleFormat() {
-    final digits = _controller.text.replaceAll(RegExp(r'\D'), '');
-    final trimmed = digits.length > 10 ? digits.substring(digits.length - 10) : digits;
-
-    // Format number as XXXXX YYYYY
-    String formatted = '';
-    if (trimmed.length <= 5) {
-      formatted = trimmed;
-    } else {
-      formatted = '${trimmed.substring(0, 5)} ${trimmed.substring(5)}';
-    }
-
-    setState(() {
-      rawNumber = trimmed;
-      showIcon = trimmed.length == 10;
-
-      // 🧼 Hide carrier info if input is deleted or incomplete
-      if (trimmed.length < 10) {
-        carrier = null;
-      }
-    });
-
-    _controller.value = TextEditingValue(
-      text: formatted,
-      selection: TextSelection.collapsed(offset: formatted.length),
-    );
-  }
-
-  Future<void> _lookupCarrier() async {
-    FocusScope.of(context).unfocus();
-
-    if (rawNumber.length != 10) return;
-
-    setState(() => carrier = null); // Reset before search
-
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (_) => const Center(child: CircularProgressIndicator()),
-    );
-
-    final result = await ref.read(numlookupProvider('+91$rawNumber').future);
-
-    Navigator.of(context).pop();
-
-    if (result != null) {
-      setState(() {
-        carrier = result;
-      });
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Provider found!')),
-      );
-    }
-  }
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
-
-  @override
   Widget build(BuildContext context) {
-    final textColor = Theme.of(context).colorScheme.onSurface;
+    final services = [
+      {"icon": Icons.phone_android, "label": "Mobile"},
+      {"icon": Icons.electric_bolt, "label": "Electricity"},
+      {"icon": Icons.tv, "label": "DTH"},
+      {"icon": Icons.verified_user, "label": "Insurance"},
+      {"icon": Icons.assignment_ind, "label": "NSDL PAN"},
+      {"icon": Icons.local_gas_station, "label": "Gas Booking"},
+      {"icon": Icons.flash_on, "label": "Electricity"},
+      {"icon": Icons.local_gas_station_outlined, "label": "FasTag"},
+      {"icon": Icons.wifi, "label": "Broadband"},
+      {"icon": Icons.payments, "label": "Loan EMI Payment"},
+      {"icon": Icons.more_horiz, "label": "More BBPS"},
+    ];
 
     return Scaffold(
-      appBar: AppBar(title: const Text("Enter mobile number")),
-      body: Padding(
-        padding: const EdgeInsets.all(16.0),
+      appBar: AppBar(
+        backgroundColor: Colors.white,
+        elevation: 0,
+        title: const Text('DASHBOARD', style: TextStyle(color: Colors.black, fontWeight: FontWeight.w600)),
+      ),
+      body: Container(
+        color: Colors.white,
+        padding: const EdgeInsets.all(18),
         child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Row(
-              children: [
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 16),
-                  decoration: BoxDecoration(
-                    border: Border.all(color: Colors.grey),
-                    borderRadius: BorderRadius.circular(4),
-                  ),
-                  child: const Text(
-                    '+91',
-                    style: TextStyle(fontSize: 16),
-                  ),
-                ),
-                Expanded(
-                  child: TextField(
-                    controller: _controller,
-                    keyboardType: TextInputType.number,
-                    inputFormatters: [
-                      FilteringTextInputFormatter.digitsOnly,
-                      LengthLimitingTextInputFormatter(10),
-                    ],
-                    decoration: InputDecoration(
-                      hintText: '00000 00000',
-                      border: const OutlineInputBorder(),
-                      counterText: '',
-                      suffixIcon: showIcon
-                          ? IconButton(
-                        icon: const Icon(Icons.arrow_right_alt),
-                        onPressed: _lookupCarrier,
-                      )
-                          : null,
+            Container(
+              width: double.infinity,
+              margin: const EdgeInsets.only(bottom: 20),
+              decoration: BoxDecoration(
+                color: Colors.indigo.shade50,
+                borderRadius: BorderRadius.circular(14),
+              ),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 26, horizontal: 20),
+                child: Row(
+                  children: [
+                    const Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          "Welcome",
+                          style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 18,
+                            color: Colors.black87,
+                          ),
+                        ),
+                        SizedBox(height: 8),
+                        Text(
+                          "Glad to see you here!",
+                          style: TextStyle(
+                            fontSize: 14,
+                            color: Colors.black54,
+                          ),
+                        ),
+                        SizedBox(height: 4),
+                        Text(
+                          "Start exploring our services.",
+                          style: TextStyle(
+                            fontWeight: FontWeight.w600,
+                            fontSize: 16,
+                            color: Colors.black87,
+                          ),
+                        ),
+                      ],
                     ),
-                  ),
+                    const Spacer(),
+                    // The wallet balance display is removed
+                    const SizedBox(width: 40),
+                  ],
                 ),
-              ],
-            ),
-            const SizedBox(height: 6),
-            Align(
-              alignment: Alignment.centerLeft,
-              child: Text(
-                "Ensure this is a valid mobile number",
-                style: TextStyle(fontSize: 13, color: textColor.withOpacity(0.6)),
               ),
             ),
-            const SizedBox(height: 20),
-            if (carrier != null)
-              Column(
-                children: [
-                  const Text(
-                    "Provider found!",
-                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.green),
-                  ),
-                  const SizedBox(height: 6),
-                  Text(
-                    'Provider: $carrier',
-                    style: const TextStyle(fontSize: 18),
-                  ),
-                ],
+            const Padding(
+              padding: EdgeInsets.only(bottom: 10),
+              child: Text("Services", style: TextStyle(fontWeight: FontWeight.w600, fontSize: 16)),
+            ),
+            Expanded(
+              child: GridView.builder(
+                itemCount: services.length,
+                gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                  crossAxisCount: 4,
+                  mainAxisSpacing: 22,
+                  crossAxisSpacing: 10,
+                  childAspectRatio: 0.80,
+                ),
+                itemBuilder: (context, index) {
+                  final item = services[index];
+                  return GestureDetector(
+                    onTap: () {
+                      if (item["label"] == "Mobile") {
+                        Navigator.of(context).push(
+                          MaterialPageRoute(
+                            builder: (_) => const RechargePage(),
+                          ),
+                        );
+                      } else {
+                        // Other item taps (optional)
+                      }
+                    },
+                    child: Column(
+                      children: [
+                        Container(
+                          decoration: BoxDecoration(
+                            color: Colors.indigo.shade50,
+                            shape: BoxShape.circle,
+                          ),
+                          padding: const EdgeInsets.all(12),
+                          child: Icon(item["icon"] as IconData, color: Colors.indigo, size: 26),
+                        ),
+                        const SizedBox(height: 7),
+                        Text(
+                          item["label"] as String,
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500, color: Colors.black87),
+                        ),
+                      ],
+                    ),
+                  );
+                },
               ),
+            ),
           ],
         ),
       ),

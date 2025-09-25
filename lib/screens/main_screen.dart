@@ -1,7 +1,11 @@
+// lib/pages/main_screen.dart
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:powerpay/pages/home_page.dart';
-import '../providers/navigation_provider.dart';  // Assuming navigationIndexProvider is here
+import 'package:powerpay/screens/register_screen.dart';
+import '../pages/transaction_history_page.dart.dart';
+import '../providers/navigation_provider.dart';
 
 final lastBackPressProvider = StateProvider<DateTime?>((ref) => null);
 
@@ -11,30 +15,19 @@ class MainScreen extends ConsumerWidget {
   Future<bool> _onWillPop(BuildContext context, WidgetRef ref) async {
     final selectedIndex = ref.read(navigationIndexProvider);
     if (selectedIndex != 0) {
-      // If not on Home, go back to Home on back press instead of exiting app
       ref.read(navigationIndexProvider.notifier).state = 0;
-      return false; // Don't pop the route
+      return false;
     }
-
     final lastBackPress = ref.read(lastBackPressProvider);
     final now = DateTime.now();
-
-    if (lastBackPress == null ||
-        now.difference(lastBackPress) > const Duration(seconds: 2)) {
-      // Update the last back press time
+    if (lastBackPress == null || now.difference(lastBackPress) > const Duration(seconds: 2)) {
       ref.read(lastBackPressProvider.notifier).state = now;
-
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Press back again to exit'),
-          duration: Duration(seconds: 2),
-        ),
+        const SnackBar(content: Text('Press back again to exit'), duration: Duration(seconds: 2)),
       );
-
-      return false; // Don't exit yet
+      return false;
     }
-
-    return true; // Exit app
+    return true;
   }
 
   @override
@@ -51,10 +44,7 @@ class MainScreen extends ConsumerWidget {
           backgroundColor: const Color(0xffead8f3),
           elevation: 0,
           centerTitle: true,
-          title: Image.asset(
-            'assets/images/powerpay_logo.png',
-            height: 65,
-          ),
+          title: Image.asset('assets/images/powerpay_logo.png', height: 65),
           actions: [
             IconButton(
               icon: const Icon(Icons.notifications),
@@ -63,31 +53,28 @@ class MainScreen extends ConsumerWidget {
           ],
         )
             : null,
+
+        // Drawer + Logout
         drawer: Drawer(
-          child: ListView(
-            padding: EdgeInsets.zero,
+          child: Column(
             children: [
               DrawerHeader(
-                decoration: const BoxDecoration(
-                  color: Color(0xffead8f3),
-                ),
+                decoration: const BoxDecoration(color: Color(0xffead8f3)),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: const [
                     CircleAvatar(
                       radius: 30,
                       backgroundColor: Colors.white,
-                      child:
-                      Icon(Icons.person, size: 40, color: Colors.deepPurple),
+                      child: Icon(Icons.person, size: 40, color: Colors.deepPurple),
                     ),
                     SizedBox(height: 10),
-                    Text(
-                      'Welcome!',
-                      style: TextStyle(color: Colors.black, fontSize: 20),
-                    ),
+                    Text('Welcome!', style: TextStyle(color: Colors.black, fontSize: 20)),
                   ],
                 ),
               ),
+
+              // Menu items
               ListTile(
                 leading: const Icon(Icons.home),
                 title: const Text('Home'),
@@ -120,9 +107,40 @@ class MainScreen extends ConsumerWidget {
                   ref.read(navigationIndexProvider.notifier).state = 3;
                 },
               ),
+              ListTile(
+                leading: const Icon(Icons.money_off_rounded),
+                title: const Text('History'),
+                onTap: () {
+                  Navigator.pop(context);
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(builder: (_) => const TransactionHistoryPage()),
+                  );
+                },
+              ),
+
+              const Spacer(),
+              const Divider(height: 1),
+
+              // ---- Logout button at bottom ----
+              ListTile(
+                leading: const Icon(Icons.logout, color: Colors.redAccent),
+                title: const Text('Logout', style: TextStyle(color: Colors.redAccent)),
+                onTap: () async {
+                  Navigator.pop(context); // close drawer first
+                  await FirebaseAuth.instance.signOut();
+                  if (!context.mounted) return;
+                  Navigator.of(context).pushAndRemoveUntil(
+                    MaterialPageRoute(builder: (_) => const RegisterScreen()),
+                        (_) => false,
+                  );
+                },
+              ),
+              const SizedBox(height: 8),
             ],
           ),
         ),
+
         body: Column(
           children: [
             if (isHome) const Expanded(child: HomePage()),
