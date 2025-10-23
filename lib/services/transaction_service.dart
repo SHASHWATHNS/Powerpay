@@ -1,84 +1,81 @@
-// lib/services/transaction_service.dart
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../models/transaction_model.dart';
+
+final transactionServiceProvider = Provider((ref) {
+  return TransactionService(
+    FirebaseAuth.instance,
+    FirebaseFirestore.instance,
+  );
+});
 
 class TransactionService {
-  final _db = FirebaseFirestore.instance;
-  final _auth = FirebaseAuth.instance;
+  final FirebaseAuth _auth;
+  final FirebaseFirestore _firestore;
 
-  String get _uid {
-    final u = _auth.currentUser;
-    if (u == null) throw Exception('Not logged in');
-    return u.uid;
+  TransactionService(this._auth, this._firestore);
+
+  String? get _uid => _auth.currentUser?.uid;
+
+  Stream<List<TransactionRecord>> streamMyTransactions() {
+    if (_uid == null) return Stream.value([]);
+
+    final query = _firestore
+        .collection('users')
+        .doc(_uid)
+        .collection('wallet_ledger')
+        .orderBy('createdAt', descending: true)
+        .limit(50);
+
+    return query.snapshots().map((snapshot) {
+      return snapshot.docs.map((doc) => TransactionRecord.fromFirestore(doc)).toList();
+    });
   }
 
-  CollectionReference<Map<String, dynamic>> get _col =>
-      _db.collection('users').doc(_uid).collection('transactions');
-
-  // create a PENDING transaction and return its doc id
+  // ✅ ADDED: Missing method to create a pending transaction record
   Future<String> createPending({
     required String number,
     required String operatorName,
     required int amount,
   }) async {
-    final doc = await _col.add({
-      'number': number,
-      'operator': operatorName,
-      'amount': amount,
+    if (_uid == null) throw Exception('User not logged in');
+
+    final docRef = _firestore
+        .collection('users')
+        .doc(_uid)
+        .collection('wallet_ledger')
+        .doc(); // Firestore automatically generates the ID
+
+    await docRef.set({
+      'amount': -amount, // Debits are negative
+      'type': 'DEBIT',
+      'description': 'Mobile Recharge for $number',
+      'createdAt': FieldValue.serverTimestamp(),
       'status': 'pending',
-      'failureReason': null,
-      'createdAt': FieldValue.serverTimestamp(), // auto timestamp
+      'operatorName': operatorName,
+      'number': number,
     });
-    return doc.id;
+    return docRef.id;
   }
 
+  // ✅ ADDED: Missing method to update the status of a transaction
   Future<void> markStatus({
     required String id,
-    required String status, // 'success' | 'failed' | 'pending'
+    required String status,
     String? failureReason,
-  }) {
-    return _col.doc(id).update({
+  }) async {
+    if (_uid == null) throw Exception('User not logged in');
+
+    final docRef = _firestore
+        .collection('users')
+        .doc(_uid)
+        .collection('wallet_ledger')
+        .doc(id);
+
+    await docRef.update({
       'status': status,
-      'failureReason': failureReason,
+      if (failureReason != null) 'failureReason': failureReason,
     });
-  }
-
-  Stream<DocumentSnapshot<Map<String, dynamic>>> watch(String id) =>
-      _col.doc(id).snapshots();
-
-  // for history page
-  Stream<List<TransactionRecord>> streamMyTransactions() => _col
-      .orderBy('createdAt', descending: true)
-      .snapshots()
-      .map((q) => q.docs.map((d) => TransactionRecord.fromMap(d.id, d.data())).toList());
-}
-
-class TransactionRecord {
-  final String id, number, operatorName, status;
-  final int amount;
-  final String? failureReason;
-  final DateTime createdAt;
-
-  TransactionRecord({
-    required this.id,
-    required this.number,
-    required this.operatorName,
-    required this.amount,
-    required this.status,
-    required this.createdAt,
-    this.failureReason,
-  });
-
-  factory TransactionRecord.fromMap(String id, Map<String, dynamic> m) {
-    final ts = m['createdAt'];
-    return TransactionRecord(
-      id: id,
-      number: (m['number'] ?? '') as String,
-      operatorName: (m['operator'] ?? '') as String,
-      amount: (m['amount'] ?? 0) as int,
-      status: (m['status'] ?? 'pending') as String,
-      failureReason: m['failureReason'] as String?,
-      createdAt: ts is Timestamp ? ts.toDate() : DateTime.now(),
-    );
   }
 }

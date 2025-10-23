@@ -1,21 +1,23 @@
 {
-  "name": "backend",
+  "name": "powerpay-backend",
   "version": "1.0.0",
-  "description": "",
-  "main": "server.js",
+  "description": "PowerPay backend (QPay + A1Topup + Wallet)",
+  "type": "module",
+  "main": "server.mjs",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
-    "start": "node server.js"
+    "start": "node server.mjs",
+    "dev": "nodemon server.mjs"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "type": "commonjs",
   "dependencies": {
     "cors": "^2.8.5",
-    "dotenv": "^17.2.2",
+    "dotenv": "^16.4.5",
     "express": "^5.1.0",
     "firebase-admin": "^13.5.0",
-    "node-fetch": "^2.6.7"
+    "helmet": "^8.1.0",
+    "morgan": "^1.10.1",
+    "node-fetch": "^3.3.2"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.10"
   }
 }

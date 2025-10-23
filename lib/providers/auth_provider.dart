@@ -1,57 +1,70 @@
-// lib/providers/auth_provider.dart
-import 'dart:async';
-import 'package:flutter/foundation.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:powerpay/models/app_user.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-class AuthProvider extends ChangeNotifier {
-  final FirebaseAuth _auth = FirebaseAuth.instance;
+// This class will handle the actual Firebase calls
+class AuthRepository {
+  AuthRepository(this._auth, this._firestore);
+  final FirebaseAuth _auth;
+  final FirebaseFirestore _firestore;
 
-  AppUser? _current;
-  AppUser? get currentUser => _current;
-  bool get isLoggedIn => _current != null;
+  // Stream to listen to auth state changes
+  Stream<User?> get authStateChanges => _auth.authStateChanges();
 
-  late final StreamSubscription<User?> _sub;
-
-  AuthProvider() {
-    _sub = _auth.authStateChanges().listen(_onAuthStateChanged);
-  }
-
-  void _onAuthStateChanged(User? user) {
-    if (user == null) {
-      _current = null;
-    } else {
-      _current = AppUser(
-        id: user.uid,
-        name: user.displayName ?? (user.email ?? 'User'),
-        email: user.email,
+  // The login logic, moved from your screen
+  Future<void> signInWithEmailAndPassword(String email, String password) async {
+    try {
+      final userCredential = await _auth.signInWithEmailAndPassword(
+        email: email.trim(),
+        password: password,
       );
+
+      // Ensure the user document exists in Firestore
+      if (userCredential.user != null) {
+        await _ensureUserDocumentExists(userCredential.user!);
+      }
+    } catch (e) {
+      // Let the UI handle showing the error
+      rethrow;
     }
-    notifyListeners();
   }
 
-  // ---------------- Email / Password ----------------
-  Future<void> registerWithEmailPassword({
-    required String email,
-    required String password,
-  }) async {
-    await _auth.createUserWithEmailAndPassword(email: email.trim(), password: password);
-  }
-
-  Future<void> loginWithEmailPassword({
-    required String email,
-    required String password,
-  }) async {
-    await _auth.signInWithEmailAndPassword(email: email.trim(), password: password);
+  // Helper to create the user document if it doesn't exist
+  Future<void> _ensureUserDocumentExists(User user) async {
+    final userDocRef = _firestore.collection('users').doc(user.uid);
+    final userDoc = await userDocRef.get();
+    if (!userDoc.exists) {
+      await userDocRef.set({
+        'email': user.email,
+        'walletBalance': 0,
+        'createdAt': FieldValue.serverTimestamp(),
+      });
+    }
   }
 
   Future<void> signOut() async {
     await _auth.signOut();
   }
-
-  @override
-  void dispose() {
-    _sub.cancel();
-    super.dispose();
-  }
 }
+
+// --- RIVERPOD PROVIDERS ---
+
+// Provider for the FirebaseAuth instance
+final firebaseAuthProvider =
+Provider<FirebaseAuth>((ref) => FirebaseAuth.instance);
+
+// Provider for the FirebaseFirestore instance
+final firestoreProvider =
+Provider<FirebaseFirestore>((ref) => FirebaseFirestore.instance);
+
+// Provider for our AuthRepository
+final authRepositoryProvider = Provider<AuthRepository>((ref) {
+  return AuthRepository(
+      ref.watch(firebaseAuthProvider), ref.watch(firestoreProvider));
+});
+
+// StreamProvider to watch the auth state
+// This is the main provider our app will listen to
+final authStateChangesProvider = StreamProvider<User?>((ref) {
+  return ref.watch(authRepositoryProvider).authStateChanges;
+});

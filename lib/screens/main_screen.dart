@@ -1,18 +1,32 @@
-// lib/pages/main_screen.dart
+// lib/screens/main_screen.dart
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:powerpay/pages/home_page.dart';
+import 'package:powerpay/pages/support_page.dart';
+import 'package:powerpay/pages/bank_page.dart'; // Renamed import to avoid conflict
+import 'package:powerpay/pages/commission_page.dart';
+import 'package:powerpay/providers/navigation_provider.dart';
 import 'package:powerpay/screens/register_screen.dart';
+
 import '../pages/transaction_history_page.dart.dart';
-import '../providers/navigation_provider.dart';
+import '../pages/wallet_ledger_page.dart';
+import 'user_management_page.dart';
+
+// --- Color Constants from HomePage ---
+const Color brandPurple = Color(0xFF5A189A);
+const Color brandPink = Color(0xFFDA70D6);
+const Color lightBackground = Color(0xFFFFFFFF);
+const Color primaryText = Color(0xFF1E1E1E);
+// --- End Color Constants ---
 
 final lastBackPressProvider = StateProvider<DateTime?>((ref) => null);
 
 class MainScreen extends ConsumerWidget {
   const MainScreen({super.key});
 
-  Future<bool> _onWillPop(BuildContext context, WidgetRef ref) async {
+  Future<bool> _handleBackButton(BuildContext context, WidgetRef ref) async {
     final selectedIndex = ref.read(navigationIndexProvider);
     if (selectedIndex != 0) {
       ref.read(navigationIndexProvider.notifier).state = 0;
@@ -33,118 +47,174 @@ class MainScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final selectedIndex = ref.watch(navigationIndexProvider);
-    final bool isHome = selectedIndex == 0;
+    final isHome = selectedIndex == 0;
+    final user = FirebaseAuth.instance.currentUser;
 
-    return WillPopScope(
-      onWillPop: () => _onWillPop(context, ref),
+    final List<Widget> pages = [
+      const HomePage(),
+      const SupportPage(),
+      const BankPage(),
+      const CommissionRatesPage(),
+    ];
+
+    return PopScope(
+      canPop: false,
+      onPopInvoked: (didPop) async {
+        if (didPop) return;
+        final shouldPop = await _handleBackButton(context, ref);
+        if (shouldPop && context.mounted) {
+          SystemNavigator.pop();
+        }
+      },
       child: Scaffold(
+        backgroundColor: lightBackground,
         appBar: isHome
             ? AppBar(
           toolbarHeight: 80,
-          backgroundColor: const Color(0xffead8f3),
+          backgroundColor: lightBackground,
           elevation: 0,
           centerTitle: true,
           title: Image.asset('assets/images/powerpay_logo.png', height: 65),
           actions: [
-            IconButton(
-              icon: const Icon(Icons.notifications),
-              onPressed: () {},
-            ),
+            //IconButton(
+              //icon: const Icon(Icons.notifications, color: primaryText),
+              //onPressed: () {},
+            //),
+            // Admin button
+
           ],
         )
             : null,
-
-        // Drawer + Logout
         drawer: Drawer(
           child: Column(
             children: [
               DrawerHeader(
-                decoration: const BoxDecoration(color: Color(0xffead8f3)),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: const [
-                    CircleAvatar(
-                      radius: 30,
-                      backgroundColor: Colors.white,
-                      child: Icon(Icons.person, size: 40, color: Colors.deepPurple),
-                    ),
-                    SizedBox(height: 10),
-                    Text('Welcome!', style: TextStyle(color: Colors.black, fontSize: 20)),
-                  ],
+                decoration: const BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: [brandPurple, brandPink],
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                  ),
+                ),
+                child: Center(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      const CircleAvatar(
+                        radius: 30,
+                        backgroundColor: Colors.white,
+                        child: Icon(Icons.person, size: 40, color: brandPurple),
+                      ),
+                      const SizedBox(height: 10),
+                      Text(
+                        user?.displayName ?? user?.email ?? 'Welcome!',
+                        style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
+                  ),
                 ),
               ),
-
-              // Menu items
               ListTile(
-                leading: const Icon(Icons.home),
-                title: const Text('Home'),
+                leading: const Icon(Icons.home, color: primaryText),
+                title: const Text('Home', style: TextStyle(color: primaryText)),
                 onTap: () {
                   Navigator.pop(context);
                   ref.read(navigationIndexProvider.notifier).state = 0;
                 },
               ),
               ListTile(
-                leading: const Icon(Icons.call),
-                title: const Text('Support'),
+                leading: const Icon(Icons.support_agent, color: primaryText),
+                title: const Text('Support', style: TextStyle(color: primaryText)),
                 onTap: () {
                   Navigator.pop(context);
                   ref.read(navigationIndexProvider.notifier).state = 1;
                 },
               ),
               ListTile(
-                leading: const Icon(Icons.money),
-                title: const Text('Payments'),
+                leading: const Icon(Icons.money, color: primaryText),
+                title: const Text('Payments', style: TextStyle(color: primaryText)),
                 onTap: () {
                   Navigator.pop(context);
                   ref.read(navigationIndexProvider.notifier).state = 2;
                 },
               ),
               ListTile(
-                leading: const Icon(Icons.person),
-                title: const Text('Profile'),
+                leading: const Icon(Icons.person, color: primaryText),
+                title: const Text('Commissions', style: TextStyle(color: primaryText)),
                 onTap: () {
                   Navigator.pop(context);
                   ref.read(navigationIndexProvider.notifier).state = 3;
                 },
               ),
               ListTile(
-                leading: const Icon(Icons.money_off_rounded),
-                title: const Text('History'),
+                leading: const Icon(Icons.account_balance_wallet_outlined, color: primaryText),
+                title: const Text('Wallet Transactions', style: TextStyle(color: primaryText)),
                 onTap: () {
                   Navigator.pop(context);
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(builder: (_) => const TransactionHistoryPage()),
-                  );
+                  Navigator.push(context, MaterialPageRoute(builder: (_) => const WalletLedgerPage()));
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.history, color: primaryText),
+                title: const Text('History', style: TextStyle(color: primaryText)),
+                onTap: () {
+                  Navigator.pop(context);
+                  Navigator.push(context, MaterialPageRoute(builder: (_) => const TransactionHistoryPage()));
                 },
               ),
 
               const Spacer(),
               const Divider(height: 1),
-
-              // ---- Logout button at bottom ----
+              // ✅ MODIFIED LOGOUT TILE
               ListTile(
                 leading: const Icon(Icons.logout, color: Colors.redAccent),
                 title: const Text('Logout', style: TextStyle(color: Colors.redAccent)),
                 onTap: () async {
-                  Navigator.pop(context); // close drawer first
                   await FirebaseAuth.instance.signOut();
-                  if (!context.mounted) return;
-                  Navigator.of(context).pushAndRemoveUntil(
-                    MaterialPageRoute(builder: (_) => const RegisterScreen()),
-                        (_) => false,
-                  );
+                  // This command explicitly navigates to the LoginScreen and clears
+                  // all previous screens from history, so the user can't go back.
+                  if (context.mounted) {
+                    Navigator.of(context).pushAndRemoveUntil(
+                      MaterialPageRoute(builder: (context) => const RegisterScreen()),
+                          (Route<dynamic> route) => false,
+                    );
+                  }
                 },
               ),
               const SizedBox(height: 8),
             ],
           ),
         ),
-
-        body: Column(
-          children: [
-            if (isHome) const Expanded(child: HomePage()),
-          ],
+        body: pages[selectedIndex],
+        bottomNavigationBar: Container(
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: const BorderRadius.only(
+                topLeft: Radius.circular(20), topRight: Radius.circular(20)),
+            boxShadow: [
+              BoxShadow(
+                  color: Colors.black.withOpacity(0.1),
+                  blurRadius: 12,
+                  offset: const Offset(0, -2))
+            ],
+          ),
+          child: BottomNavigationBar(
+            elevation: 0,
+            selectedItemColor: brandPurple,
+            unselectedItemColor: Colors.grey.shade500,
+            backgroundColor: Colors.transparent,
+            type: BottomNavigationBarType.fixed,
+            currentIndex: selectedIndex,
+            onTap: (i) =>
+            ref.read(navigationIndexProvider.notifier).state = i,
+            items: const [
+              BottomNavigationBarItem(icon: Icon(Icons.home), label: "Home"),
+              BottomNavigationBarItem(icon: Icon(Icons.support_agent), label: "Support"),
+              BottomNavigationBarItem(icon: Icon(Icons.money), label: "Payments"),
+              BottomNavigationBarItem(icon: Icon(Icons.person), label: "Commissions"),
+            ],
+          ),
         ),
       ),
     );
