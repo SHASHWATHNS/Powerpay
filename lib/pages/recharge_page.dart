@@ -1,9 +1,11 @@
+// lib/screens/recharge_page.dart
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:powerpay/providers/recharge_controller.dart';
 import 'package:powerpay/services/api_mapper_service.dart';
+import 'payment_webview_screen.dart'; // <<-- new import, file below
 
 class RechargePage extends ConsumerStatefulWidget {
   const RechargePage({super.key});
@@ -15,6 +17,9 @@ class RechargePage extends ConsumerStatefulWidget {
 class _RechargePageState extends ConsumerState<RechargePage> {
   late final TextEditingController _numberController;
   late final TextEditingController _amountController;
+
+  // Hosted shortlink (temporary payment page)
+  static const String _fallbackPaymentShortlink = 'https://rzp.io/rzp/xd8KZaS';
 
   @override
   void initState() {
@@ -93,15 +98,54 @@ class _RechargePageState extends ConsumerState<RechargePage> {
           ElevatedButton(
             onPressed: state.isLoading
                 ? null
-                : () {
+                : () async {
               final user = FirebaseAuth.instance.currentUser;
               final amount = int.tryParse(_amountController.text) ?? 0;
-              if (user != null && amount > 0) {
-                controller.performRecharge(
-                  number: _numberController.text,
-                  amount: amount,
-                  uid: user.uid,
+              final number = _numberController.text.trim();
+
+              if (user == null) {
+                if (!mounted) return;
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Please login to continue')),
                 );
+                return;
+              }
+              if (amount <= 0) {
+                if (!mounted) return;
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Enter a valid amount')),
+                );
+                return;
+              }
+              if (number.length != 10) {
+                if (!mounted) return;
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Enter a valid 10-digit mobile number')),
+                );
+                return;
+              }
+
+              // Instead of calling performRecharge directly, open hosted payment page in WebView
+              final paymentUrl = '$_fallbackPaymentShortlink?amount=$amount&number=$number';
+
+              // push webview and await result (true means confirmed)
+              final confirmed = await Navigator.of(context).push<bool>(
+                MaterialPageRoute(
+                  builder: (_) => PaymentWebViewScreen(initialUrl: paymentUrl),
+                ),
+              );
+
+              if (confirmed == true) {
+                // WebView indicated success (or user manually confirmed). Now call performRecharge to complete process.
+                // This keeps your existing backend call and state updates intact.
+                controller.performRecharge(number: number, amount: amount, uid: user.uid);
+                // Optionally clear fields:
+                _amountController.clear();
+                _numberController.clear();
+              } else {
+                // not confirmed
+                if (!mounted) return;
+                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Payment not completed')));
               }
             },
             style: ElevatedButton.styleFrom(

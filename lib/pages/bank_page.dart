@@ -24,6 +24,9 @@ class _BankPageState extends ConsumerState<BankPage> with WidgetsBindingObserver
   final _amountController = TextEditingController();
   final _formKey = GlobalKey<FormState>();
 
+  // Fallback payment shortlink (temporary flow)
+  static const String _fallbackPaymentShortlink = 'https://rzp.io/rzp/xd8KZaS';
+
   @override
   void initState() {
     super.initState();
@@ -60,7 +63,7 @@ class _BankPageState extends ConsumerState<BankPage> with WidgetsBindingObserver
       if (ok) return;
     }
 
-    // 2) Fallback to in-app webview (emulators often lack Chrome)
+    // 2) Fallback to in-app webview
     final okWebView = await launchUrl(uri, mode: LaunchMode.inAppWebView);
     debugPrint('[BankPage] launch in-app webview result = $okWebView');
     if (okWebView) return;
@@ -109,21 +112,41 @@ class _BankPageState extends ConsumerState<BankPage> with WidgetsBindingObserver
       debugPrint('[BankPage] Creating QPay order for ₹$amount');
       final walletService = ref.read(walletServiceProvider);
 
-      final orderData = await walletService.createQPayIndiaOrder(amount);
-      debugPrint('[BankPage] createQPayIndiaOrder OK: $orderData');
+      // Attempt to create order via backend QPay integration
+      Map<String, dynamic>? orderData;
+      try {
+        orderData = await walletService.createQPayIndiaOrder(amount);
+        debugPrint('[BankPage] createQPayIndiaOrder OK: $orderData');
+      } catch (e) {
+        debugPrint('[BankPage] createQPayIndiaOrder failed: $e');
+        orderData = null;
+      }
 
-      // ✅ Use the unified field from backend
-      final launchUrlStr = (orderData['launchUrl'] ?? '').toString().trim();
+      // Try backend-provided launch URL first
+      String launchUrlStr = '';
+      if (orderData != null) {
+        // backend may return different field names — prefer 'launchUrl' then 'paymentUrl' then 'url'
+        launchUrlStr = (orderData['launchUrl'] ??
+            orderData['paymentUrl'] ??
+            orderData['url'] ??
+            '')
+            .toString()
+            .trim();
+      }
+
       if (launchUrlStr.isEmpty) {
-        throw Exception('Backend did not return a valid payment URL.');
+        // No valid backend URL — use fallback shortlink
+        debugPrint('[BankPage] Backend did not return valid payment URL — using fallback shortlink');
+        // Append amount as query param (optional)
+        launchUrlStr = '$_fallbackPaymentShortlink?amount=$amount';
       }
 
       await _launchPaymentUrl(launchUrlStr);
 
       // If we got here, launching succeeded; clear input
       _amountController.clear();
-    } catch (e) {
-      debugPrint('[BankPage] Error: $e');
+    } catch (e, st) {
+      debugPrint('[BankPage] Error: $e\n$st');
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Payment Error: $e'), backgroundColor: Colors.red),
@@ -176,7 +199,8 @@ class _BankPageState extends ConsumerState<BankPage> with WidgetsBindingObserver
                 onPressed: isLoading ? null : _startQPayPayment,
                 icon: isLoading
                     ? const SizedBox(
-                  width: 20, height: 20,
+                  width: 20,
+                  height: 20,
                   child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
                 )
                     : const Icon(Icons.payment),
