@@ -10,6 +10,7 @@ class TransactionRecord {
   final String operatorName;
   final String number;
 
+
   TransactionRecord({
     required this.amount,
     required this.createdAt,
