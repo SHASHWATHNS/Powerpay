@@ -1,14 +1,14 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:powerpay/pages/payment_webview_screen.dart';
-import 'package:powerpay/pages/recharge_page.dart';
 import 'package:powerpay/pages/bank_page.dart';
+import 'package:powerpay/pages/recharge_page.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:powerpay/screens/user_management_page.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:powerpay/screens/monthly_report_page.dart';
+import 'package:powerpay/screens/commission_summary_page.dart';
+import 'package:powerpay/screens/pay_for_recharge_page.dart';
 
 import '../providers/wallet_provider.dart';
 
@@ -22,333 +22,6 @@ const Color textLight = Color(0xFF666666);
 
 class HomePage extends ConsumerWidget {
   const HomePage({super.key});
-
-  // Function to show user selection and amount input for distributor
-  void _showDistributorPaymentDialog(BuildContext context) {
-    String? selectedUserId;
-    String? selectedUserName = 'Select a user';
-    final amountController = TextEditingController();
-
-    showDialog(
-      context: context,
-      builder: (context) => StatefulBuilder(
-        builder: (context, setState) {
-          return Dialog(
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(16),
-            ),
-            elevation: 8,
-            child: Container(
-              padding: const EdgeInsets.all(24),
-              width: MediaQuery.of(context).size.width * 0.9,
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  // Header
-                  Row(
-                    children: [
-                      const Icon(Icons.payment, color: brandPurple, size: 28),
-                      const SizedBox(width: 12),
-                      Text(
-                        'Pay for User',
-                        style: GoogleFonts.poppins(
-                          fontSize: 20,
-                          fontWeight: FontWeight.w600,
-                          color: textDark,
-                        ),
-                      ),
-                    ],
-                  ),
-
-                  const SizedBox(height: 24),
-
-                  // User Selection
-                  Text(
-                    'Select User',
-                    style: GoogleFonts.poppins(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w500,
-                      color: textDark,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-
-                  StreamBuilder<QuerySnapshot>(
-                    stream: FirebaseFirestore.instance
-                        .collection('users')
-                        .where('email', isNotEqualTo: 'grow@gmail.com')
-                        .snapshots(),
-                    builder: (context, snapshot) {
-                      if (snapshot.connectionState == ConnectionState.waiting) {
-                        return Container(
-                          height: 56,
-                          padding: const EdgeInsets.symmetric(horizontal: 12),
-                          decoration: BoxDecoration(
-                            border: Border.all(color: Colors.grey.shade300),
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                          child: const Center(
-                            child: CircularProgressIndicator(),
-                          ),
-                        );
-                      }
-
-                      if (snapshot.hasError) {
-                        return Container(
-                          height: 56,
-                          padding: const EdgeInsets.symmetric(horizontal: 12),
-                          decoration: BoxDecoration(
-                            border: Border.all(color: Colors.red),
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                          child: Center(
-                            child: Text(
-                              'Error loading users',
-                              style: TextStyle(color: Colors.red),
-                            ),
-                          ),
-                        );
-                      }
-
-                      final users = snapshot.data?.docs ?? [];
-
-                      if (users.isEmpty) {
-                        return Container(
-                          height: 56,
-                          padding: const EdgeInsets.symmetric(horizontal: 12),
-                          decoration: BoxDecoration(
-                            border: Border.all(color: Colors.grey.shade300),
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                          child: Center(
-                            child: Text(
-                              'No users available',
-                              style: TextStyle(color: Colors.grey),
-                            ),
-                          ),
-                        );
-                      }
-
-                      return Container(
-                        decoration: BoxDecoration(
-                          border: Border.all(color: Colors.grey.shade300),
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        child: DropdownButtonHideUnderline(
-                          child: DropdownButton<String>(
-                            value: selectedUserId,
-                            isExpanded: true,
-                            hint: Padding(
-                              padding: const EdgeInsets.symmetric(horizontal: 12),
-                              child: Text(
-                                'Choose a user',
-                                style: TextStyle(color: Colors.grey.shade600),
-                              ),
-                            ),
-                            items: users.map((userDoc) {
-                              final userData = userDoc.data() as Map<String, dynamic>;
-                              final email = userData['email'] ?? 'No Email';
-                              final name = userData['name'] ?? email;
-
-                              return DropdownMenuItem<String>(
-                                value: userDoc.id,
-                                child: Padding(
-                                  padding: const EdgeInsets.symmetric(horizontal: 12),
-                                  child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      Text(
-                                        name,
-                                        style: const TextStyle(
-                                          fontWeight: FontWeight.w500,
-                                        ),
-                                        overflow: TextOverflow.ellipsis,
-                                      ),
-                                      Text(
-                                        email,
-                                        style: TextStyle(
-                                          fontSize: 12,
-                                          color: Colors.grey.shade600,
-                                        ),
-                                        overflow: TextOverflow.ellipsis,
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              );
-                            }).toList(),
-                            onChanged: (value) {
-                              setState(() {
-                                selectedUserId = value;
-                                if (value != null) {
-                                  final selectedUser = users.firstWhere(
-                                        (user) => user.id == value,
-                                  );
-                                  final userData = selectedUser.data() as Map<String, dynamic>;
-                                  selectedUserName = userData['name'] ?? userData['email'];
-                                }
-                              });
-                            },
-                          ),
-                        ),
-                      );
-                    },
-                  ),
-
-                  const SizedBox(height: 20),
-
-                  // Amount Input
-                  Text(
-                    'Amount',
-                    style: GoogleFonts.poppins(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w500,
-                      color: textDark,
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  TextField(
-                    controller: amountController,
-                    keyboardType: TextInputType.number,
-                    decoration: InputDecoration(
-                      hintText: 'Enter amount in ₹',
-                      prefixIcon: const Icon(Icons.currency_rupee),
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      focusedBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(8),
-                        borderSide: const BorderSide(color: brandPurple),
-                      ),
-                    ),
-                  ),
-
-                  const SizedBox(height: 32),
-
-                  // Buttons
-                  Row(
-                    children: [
-                      Expanded(
-                        child: OutlinedButton(
-                          onPressed: () => Navigator.pop(context),
-                          style: OutlinedButton.styleFrom(
-                            padding: const EdgeInsets.symmetric(vertical: 14),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                            side: BorderSide(color: Colors.grey.shade400),
-                          ),
-                          child: const Text(
-                            'Cancel',
-                            style: TextStyle(color: Colors.grey),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: ElevatedButton(
-                          onPressed: () {
-                            if (selectedUserId == null) {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(
-                                  content: Text('Please select a user'),
-                                  backgroundColor: Colors.red,
-                                ),
-                              );
-                              return;
-                            }
-
-                            final amountText = amountController.text.trim();
-                            if (amountText.isEmpty) {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(
-                                  content: Text('Please enter an amount'),
-                                  backgroundColor: Colors.red,
-                                ),
-                              );
-                              return;
-                            }
-
-                            final amount = double.tryParse(amountText);
-                            if (amount == null || amount <= 0) {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(
-                                  content: Text('Please enter a valid amount'),
-                                  backgroundColor: Colors.red,
-                                ),
-                              );
-                              return;
-                            }
-
-                            Navigator.pop(context);
-
-                            // Navigate to payment page
-                            Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder: (_) => PaymentWebViewScreen(
-                                  initialUrl: 'https://rzp.io/rzp/xd8KZaS?amount=${amount.toInt()}',
-                                ),
-                              ),
-                            );
-
-                            // Log the payment
-                            _logDistributorPayment(selectedUserId!, selectedUserName!, amount);
-                          },
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: brandPurple,
-                            padding: const EdgeInsets.symmetric(vertical: 14),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                          ),
-                          child: const Text(
-                            'Proceed to Pay',
-                            style: TextStyle(color: Colors.white),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
-          );
-        },
-      ),
-    );
-  }
-
-  // Log distributor payments in Firestore
-  // Updated distributor payment logging with error handling
-void _logDistributorPayment(String userId, String userName, double amount) {
-  final currentUser = FirebaseAuth.instance.currentUser;
-  if (currentUser == null) {
-    debugPrint('User not logged in, skipping payment log');
-    return;
-  }
-
-  FirebaseFirestore.instance
-      .collection('distributor_payments')
-      .add({
-        'userId': userId,
-        'userName': userName,
-        'amount': amount,
-        'distributorId': currentUser.uid,
-        'distributorEmail': currentUser.email,
-        'timestamp': FieldValue.serverTimestamp(),
-        'status': 'initiated',
-      })
-      .then((value) {
-        debugPrint('Distributor payment logged: $userName - ₹$amount');
-      })
-      .catchError((error) {
-        debugPrint('Error logging distributor payment: $error');
-        // Don't show error to user, just log it
-      });
-}
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -448,7 +121,7 @@ void _logDistributorPayment(String userId, String userName, double amount) {
               ),
             ),
 
-            // ✅ DISTRIBUTOR ACTIONS SECTION
+            // ✅ DISTRIBUTOR ACTIONS SECTION - SMALL CIRCULAR BUTTONS
             if (user?.email == 'grow@gmail.com')
               Padding(
                 padding: const EdgeInsets.only(top: 32.0),
@@ -463,80 +136,76 @@ void _logDistributorPayment(String userId, String userName, double amount) {
                         color: textDark,
                       ),
                     ),
-                    const SizedBox(height: 16),
+                    const SizedBox(height: 20),
 
-                    // Pay for User Card
-                    Card(
-                      elevation: 4,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: ListTile(
-                        leading: Container(
-                          padding: const EdgeInsets.all(12),
-                          decoration: BoxDecoration(
-                            color: Colors.green.withOpacity(0.1),
-                            borderRadius: BorderRadius.circular(8),
+                    // Horizontal Scrollable Small Circular Buttons
+                    SizedBox(
+                      height: 100,
+                      child: ListView(
+                        scrollDirection: Axis.horizontal,
+                        children: [
+                          const SizedBox(width: 4),
+                          
+                          // Pay for User
+                          _buildSmallActionButton(
+                            title: 'Pay for User',
+                            icon: Icons.payment,
+                            color: Colors.green,
+                            onTap: () {
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(builder: (_) => const PayForRechargePage()),
+                              );
+                            },
                           ),
-                          child: const Icon(Icons.payment, color: Colors.green),
-                        ),
-                        title: Text(
-                          'Pay for User',
-                          style: GoogleFonts.poppins(
-                            fontWeight: FontWeight.w600,
+                          
+                          const SizedBox(width: 20),
+                          
+                          // Users List
+                          _buildSmallActionButton(
+                            title: 'Users List',
+                            icon: Icons.people,
+                            color: brandBlue,
+                            onTap: () {
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(builder: (_) => const UserManagementPage()),
+                              );
+                            },
                           ),
-                        ),
-                        subtitle: const Text('Select user and enter amount'),
-                        trailing: Container(
-                          padding: const EdgeInsets.all(6),
-                          decoration: BoxDecoration(
-                            color: brandPurple.withOpacity(0.1),
-                            borderRadius: BorderRadius.circular(6),
+                          
+                          const SizedBox(width: 20),
+                          
+                          // Monthly Report
+                          _buildSmallActionButton(
+                            title: 'Monthly Report',
+                            icon: Icons.bar_chart,
+                            color: Colors.orange,
+                            onTap: () {
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(builder: (_) => const MonthlyReportPage()),
+                              );
+                            },
                           ),
-                          child: const Icon(Icons.arrow_forward, size: 16, color: brandPurple),
-                        ),
-                        onTap: () {
-                          _showDistributorPaymentDialog(context);
-                        },
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-
-                    // User Management Card
-                    Card(
-                      elevation: 4,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: ListTile(
-                        leading: Container(
-                          padding: const EdgeInsets.all(12),
-                          decoration: BoxDecoration(
-                            color: brandPurple.withOpacity(0.1),
-                            borderRadius: BorderRadius.circular(8),
+                          
+                          const SizedBox(width: 20),
+                          
+                          // Commission
+                          _buildSmallActionButton(
+                            title: 'Commission',
+                            icon: Icons.attach_money,
+                            color: brandPurple,
+                            onTap: () {
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(builder: (_) => const CommissionSummaryPage()),
+                              );
+                            },
                           ),
-                          child: const Icon(Icons.manage_accounts, color: brandPurple),
-                        ),
-                        title: Text(
-                          'User Management',
-                          style: GoogleFonts.poppins(
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                        trailing: Container(
-                          padding: const EdgeInsets.all(6),
-                          decoration: BoxDecoration(
-                            color: brandPurple.withOpacity(0.1),
-                            borderRadius: BorderRadius.circular(6),
-                          ),
-                          child: const Icon(Icons.arrow_forward, size: 16, color: brandPurple),
-                        ),
-                        onTap: () {
-                          Navigator.push(
-                            context,
-                            MaterialPageRoute(builder: (_) => const UserManagementPage()),
-                          );
-                        },
+                          
+                          const SizedBox(width: 4),
+                        ],
                       ),
                     ),
                   ],
@@ -620,5 +289,66 @@ void _logDistributorPayment(String userId, String userName, double amount) {
         ),
       ),
     );
+  }
+
+  // Helper method to build small circular action buttons like mobile button
+  Widget _buildSmallActionButton({
+    required String title,
+    required IconData icon,
+    required Color color,
+    required VoidCallback onTap,
+  }) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              gradient: LinearGradient(
+                colors: [color, _darkenColor(color, 0.2)],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+              ),
+              boxShadow: [
+                BoxShadow(
+                  color: color.withOpacity(0.3),
+                  blurRadius: 10,
+                  offset: const Offset(2, 4),
+                )
+              ],
+            ),
+            child: Icon(
+              icon,
+              color: Colors.white,
+              size: 26,
+            ),
+          ),
+          const SizedBox(height: 6),
+          Text(
+            title,
+            style: GoogleFonts.poppins(
+              fontSize: 12,
+              color: textLight,
+            ),
+            textAlign: TextAlign.center,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+          ),
+        ],
+      ),
+    );
+  }
+
+  // Helper function to darken color for gradient
+  Color _darkenColor(Color color, [double amount = 0.1]) {
+    assert(amount >= 0 && amount <= 1);
+
+    final hsl = HSLColor.fromColor(color);
+    final hslDark = hsl.withLightness((hsl.lightness - amount).clamp(0.0, 1.0));
+
+    return hslDark.toColor();
   }
 }

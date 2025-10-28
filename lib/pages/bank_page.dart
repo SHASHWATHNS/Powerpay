@@ -21,8 +21,8 @@ class BankPage extends ConsumerStatefulWidget {
 }
 
 class _BankPageState extends ConsumerState<BankPage> with WidgetsBindingObserver {
-  final _amountController = TextEditingController();
-  final _formKey = GlobalKey<FormState>();
+  // Fixed amount of ₹1099
+  static const int fixedAmount = 1099;
 
   // Fallback payment shortlink (temporary flow)
   static const String _fallbackPaymentShortlink = 'https://rzp.io/rzp/xd8KZaS';
@@ -37,7 +37,6 @@ class _BankPageState extends ConsumerState<BankPage> with WidgetsBindingObserver
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
-    _amountController.dispose();
     super.dispose();
   }
 
@@ -100,22 +99,17 @@ class _BankPageState extends ConsumerState<BankPage> with WidgetsBindingObserver
   }
 
   Future<void> _startQPayPayment() async {
-    if (!_formKey.currentState!.validate()) return;
-
     final loading = ref.read(bankPageLoadingProvider.notifier);
     loading.state = true;
 
     try {
-      final amountText = _amountController.text.trim();
-      final amount = int.parse(amountText);
-
-      debugPrint('[BankPage] Creating QPay order for ₹$amount');
+      debugPrint('[BankPage] Creating QPay order for ₹$fixedAmount');
       final walletService = ref.read(walletServiceProvider);
 
       // Attempt to create order via backend QPay integration
       Map<String, dynamic>? orderData;
       try {
-        orderData = await walletService.createQPayIndiaOrder(amount);
+        orderData = await walletService.createQPayIndiaOrder(fixedAmount);
         debugPrint('[BankPage] createQPayIndiaOrder OK: $orderData');
       } catch (e) {
         debugPrint('[BankPage] createQPayIndiaOrder failed: $e');
@@ -137,14 +131,12 @@ class _BankPageState extends ConsumerState<BankPage> with WidgetsBindingObserver
       if (launchUrlStr.isEmpty) {
         // No valid backend URL — use fallback shortlink
         debugPrint('[BankPage] Backend did not return valid payment URL — using fallback shortlink');
-        // Append amount as query param (optional)
-        launchUrlStr = '$_fallbackPaymentShortlink?amount=$amount';
+        // Append amount as query param
+        launchUrlStr = '$_fallbackPaymentShortlink?amount=$fixedAmount';
       }
 
       await _launchPaymentUrl(launchUrlStr);
 
-      // If we got here, launching succeeded; clear input
-      _amountController.clear();
     } catch (e, st) {
       debugPrint('[BankPage] Error: $e\n$st');
       if (!mounted) return;
@@ -164,64 +156,86 @@ class _BankPageState extends ConsumerState<BankPage> with WidgetsBindingObserver
       appBar: AppBar(title: const Text('Add Money to Wallet')),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(16.0),
-        child: Form(
-          key: _formKey,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              const Text(
-                'Top-up Wallet using QPay',
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.indigo),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            // Amount Display Card
+            Card(
+              elevation: 4,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(16),
               ),
-              const SizedBox(height: 16),
-              TextFormField(
-                controller: _amountController,
-                keyboardType: TextInputType.number,
-                inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                decoration: InputDecoration(
-                  labelText: 'Amount (in ₹)',
-                  hintText: 'Minimum ₹10',
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                  prefixIcon: const Icon(Icons.currency_rupee),
-                ),
-                validator: (value) {
-                  final v = value?.trim() ?? '';
-                  if (v.isEmpty) return 'Please enter an amount';
-                  final n = int.tryParse(v);
-                  if (n == null || n < 10) {
-                    return 'Amount must be a whole number, minimum ₹10';
-                  }
-                  return null;
-                },
-              ),
-              const SizedBox(height: 24),
-              ElevatedButton.icon(
-                onPressed: isLoading ? null : _startQPayPayment,
-                icon: isLoading
-                    ? const SizedBox(
-                  width: 20,
-                  height: 20,
-                  child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
-                )
-                    : const Icon(Icons.payment),
-                label: Text(isLoading ? 'Preparing Payment...' : 'Add Money Now'),
-                style: ElevatedButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(vertical: 14),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                  backgroundColor: Colors.indigo,
-                  foregroundColor: Colors.white,
+              child: Padding(
+                padding: const EdgeInsets.all(24.0),
+                child: Column(
+                  children: [
+                    Text(
+                      'Fixed Amount',
+                      style: TextStyle(
+                        fontSize: 16,
+                        color: Colors.grey.shade600,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      '₹$fixedAmount',
+                      style: const TextStyle(
+                        fontSize: 36,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.indigo,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      'Standard recharge amount',
+                      style: TextStyle(
+                        fontSize: 14,
+                        color: Colors.grey.shade500,
+                      ),
+                    ),
+                  ],
                 ),
               ),
-              const SizedBox(height: 20),
-              const Center(
-                child: Text(
-                  'Your balance will update automatically after you return to the app.',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(color: Colors.grey, fontSize: 12),
-                ),
+            ),
+            
+            const SizedBox(height: 24),
+            
+            const Text(
+              'Top-up Wallet using QPay',
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.indigo),
+              textAlign: TextAlign.center,
+            ),
+            
+            const SizedBox(height: 24),
+            
+            ElevatedButton.icon(
+              onPressed: isLoading ? null : _startQPayPayment,
+              icon: isLoading
+                  ? const SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
+                    )
+                  : const Icon(Icons.payment),
+              label: Text(isLoading ? 'Processing ₹$fixedAmount...' : 'Pay ₹$fixedAmount'),
+              style: ElevatedButton.styleFrom(
+                padding: const EdgeInsets.symmetric(vertical: 16),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                backgroundColor: Colors.indigo,
+                foregroundColor: Colors.white,
               ),
-            ],
-          ),
+            ),
+            
+            const SizedBox(height: 20),
+            
+            const Center(
+              child: Text(
+                'Your balance will update automatically after you return to the app.',
+                textAlign: TextAlign.center,
+                style: TextStyle(color: Colors.grey, fontSize: 12),
+              ),
+            ),
+          ],
         ),
       ),
     );
