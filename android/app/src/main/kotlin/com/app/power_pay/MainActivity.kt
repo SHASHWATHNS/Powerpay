@@ -1,4 +1,4 @@
-package com.services.powerpay
+package com.services.power_pay
 
 import io.flutter.embedding.android.FlutterActivity
 

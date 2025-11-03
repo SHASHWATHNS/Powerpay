@@ -1,4 +1,4 @@
-import java.util.Properties
+﻿import java.util.Properties
 import java.io.FileInputStream
 
 plugins {
@@ -14,16 +14,18 @@ dependencies {
     implementation("com.google.android.gms:play-services-auth:21.1.1")
 }
 
-// --- Load keystore properties (expects android/key.properties) ---
-val keystorePropertiesFile = rootProject.file("key.properties")
-val keystoreProperties = Properties().apply {
-    if (keystorePropertiesFile.exists()) {
-        FileInputStream(keystorePropertiesFile).use { load(it) }
-    }
+// --- Load keystore properties (expects android/key.properties at android/)
+// --- Load keystore properties safely ---
+val keystoreProperties = Properties()
+val keystorePropertiesFile = file("../key.properties")
+if (keystorePropertiesFile.exists()) {
+    keystoreProperties.load(FileInputStream(keystorePropertiesFile))
+} else {
+    throw GradleException("Missing android/key.properties file.")
 }
 
 android {
-    namespace = "com.services.powerpay"
+    namespace = "com.services.power_pay"
     compileSdk = flutter.compileSdkVersion.toInt()
     ndkVersion = flutter.ndkVersion
 
@@ -37,37 +39,34 @@ android {
     }
 
     defaultConfig {
-        applicationId = "com.services.powerpay"
+        applicationId = "com.services.power_pay"
         minSdk = flutter.minSdkVersion.toInt()
         targetSdk = flutter.targetSdkVersion.toInt()
         versionCode = flutter.versionCode.toInt()
         versionName = flutter.versionName
     }
 
-    // --- signingConfigs: release ---
+    // --- signingConfigs: release (reads android/key.properties) ---
     signingConfigs {
         create("release") {
-            keyAlias = keystoreProperties["keyAlias"] as String?
-            keyPassword = keystoreProperties["keyPassword"] as String?
-            storePassword = keystoreProperties["storePassword"] as String?
-
-            val storePath = keystoreProperties["storeFile"]?.toString()
-            require(!storePath.isNullOrBlank()) { "storeFile is missing in key.properties" }
-
-            // Works for absolute paths, or resolves a relative path from android/app
-            storeFile = file(storePath)
+            keyAlias = keystoreProperties.getProperty("keyAlias", "")
+            keyPassword = keystoreProperties.getProperty("keyPassword", "")
+            storePassword = keystoreProperties.getProperty("storePassword", "")
+            storeFile = rootProject.file(
+                keystoreProperties.getProperty("storeFile") ?: "app/my-release-key.jks"
+            )
         }
     }
+
 
     buildTypes {
-        release {
+        getByName("release") {
             signingConfig = signingConfigs.getByName("release")
-            // minify/shrink/proguard remain as you had them (commented)
-            // isMinifyEnabled = true
-            // isShrinkResources = true
-            // proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            isMinifyEnabled = false
+            isShrinkResources = false
         }
     }
+
 }
 
 flutter {

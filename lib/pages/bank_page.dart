@@ -21,11 +21,15 @@ class BankPage extends ConsumerStatefulWidget {
 }
 
 class _BankPageState extends ConsumerState<BankPage> with WidgetsBindingObserver {
-  // Fixed amount of ₹1099
-  static const int fixedAmount = 1099;
+  // Plans configuration
+  final List<_Plan> _plans = const [
+    _Plan(amount: 1000, id: 902, title: 'Plan 1 — ₹1000', subtitle: 'Top-up ₹1000'),
+    _Plan(amount: 3000, id: 903, title: 'Plan 2 — ₹3000', subtitle: 'Top-up ₹3000'),
+    _Plan(amount: 5000, id: 904, title: 'Plan 3 — ₹5000', subtitle: 'Top-up ₹5000'),
+  ];
 
-  // Fallback payment shortlink (temporary flow)
-  static const String _fallbackPaymentShortlink = 'https://rzp.io/rzp/xd8KZaS';
+  // Selected plan index
+  int _selectedPlanIndex = 0;
 
   @override
   void initState() {
@@ -98,53 +102,45 @@ class _BankPageState extends ConsumerState<BankPage> with WidgetsBindingObserver
     throw Exception('Could not launch the payment URL.');
   }
 
-  Future<void> _startQPayPayment() async {
+  Future<void> _startQPayPaymentForSelectedPlan() async {
     final loading = ref.read(bankPageLoadingProvider.notifier);
     loading.state = true;
 
     try {
-      debugPrint('[BankPage] Creating QPay order for ₹$fixedAmount');
-      final walletService = ref.read(walletServiceProvider);
+      final plan = _plans[_selectedPlanIndex];
+      debugPrint('[BankPage] Selected plan: ${plan.title} (₹${plan.amount})');
 
-      // Attempt to create order via backend QPay integration
-      Map<String, dynamic>? orderData;
-      try {
-        orderData = await walletService.createQPayIndiaOrder(fixedAmount);
-        debugPrint('[BankPage] createQPayIndiaOrder OK: $orderData');
-      } catch (e) {
-        debugPrint('[BankPage] createQPayIndiaOrder failed: $e');
-        orderData = null;
-      }
+      // Build the QPay link for the chosen plan (IDs come from user)
+      final paymentLink =
+          'https://pg.qpayindia.com/WWWS/Merchant/PaymentLinkoptions/PaymentURLLink.aspx?id=${plan.id}';
 
-      // Try backend-provided launch URL first
-      String launchUrlStr = '';
-      if (orderData != null) {
-        // backend may return different field names — prefer 'launchUrl' then 'paymentUrl' then 'url'
-        launchUrlStr = (orderData['launchUrl'] ??
-            orderData['paymentUrl'] ??
-            orderData['url'] ??
-            '')
-            .toString()
-            .trim();
-      }
+      // Optional: append amount (not required if link already encodes it)
+      final launchUrlStr = paymentLink; // or '$paymentLink&amount=${plan.amount}';
 
-      if (launchUrlStr.isEmpty) {
-        // No valid backend URL — use fallback shortlink
-        debugPrint('[BankPage] Backend did not return valid payment URL — using fallback shortlink');
-        // Append amount as query param
-        launchUrlStr = '$_fallbackPaymentShortlink?amount=$fixedAmount';
+      // Show a short message then launch
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Opening payment page for ₹${plan.amount}...')),
+        );
       }
 
       await _launchPaymentUrl(launchUrlStr);
 
+      // NOTE:
+      // We rely on the app lifecycle (resumed) to refresh the wallet balance after payment.
+      // Many payment providers redirect back to the app (deep link) or the user returns via browser.
+      // When the app regains focus, didChangeAppLifecycleState will invalidate the wallet provider.
+      debugPrint('[BankPage] Launched payment link for plan id=${plan.id}');
     } catch (e, st) {
-      debugPrint('[BankPage] Error: $e\n$st');
+      debugPrint('[BankPage] Error while starting payment: $e\n$st');
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Payment Error: $e'), backgroundColor: Colors.red),
       );
     } finally {
-      if (mounted) loading.state = false;
+      if (mounted) {
+        loading.state = false;
+      }
     }
   }
 
@@ -159,75 +155,140 @@ class _BankPageState extends ConsumerState<BankPage> with WidgetsBindingObserver
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            // Amount Display Card
+            // Header / Info Card
             Card(
               elevation: 4,
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(16),
               ),
               child: Padding(
-                padding: const EdgeInsets.all(24.0),
+                padding: const EdgeInsets.all(20.0),
                 child: Column(
                   children: [
                     Text(
-                      'Fixed Amount',
+                      'Choose a Top-up Plan',
                       style: TextStyle(
                         fontSize: 16,
-                        color: Colors.grey.shade600,
+                        color: Colors.grey.shade700,
                       ),
                     ),
-                    const SizedBox(height: 8),
-                    Text(
-                      '₹$fixedAmount',
-                      style: const TextStyle(
-                        fontSize: 36,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.indigo,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      'Standard recharge amount',
-                      style: TextStyle(
-                        fontSize: 14,
-                        color: Colors.grey.shade500,
-                      ),
+                    const SizedBox(height: 6),
+                    const Text(
+                      'Select one of the plans below to add money to your wallet.',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(fontSize: 14),
                     ),
                   ],
                 ),
               ),
             ),
-            
-            const SizedBox(height: 24),
-            
-            const Text(
-              'Top-up Wallet using QPay',
-              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.indigo),
-              textAlign: TextAlign.center,
-            ),
-            
-            const SizedBox(height: 24),
-            
+
+            const SizedBox(height: 20),
+
+            // Plans list
+            ...List.generate(_plans.length, (index) {
+              final plan = _plans[index];
+              final selected = index == _selectedPlanIndex;
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 12.0),
+                child: InkWell(
+                  onTap: () {
+                    setState(() => _selectedPlanIndex = index);
+                  },
+                  borderRadius: BorderRadius.circular(12),
+                  child: Card(
+                    elevation: selected ? 6 : 2,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      side: selected
+                          ? BorderSide(color: Colors.purple.shade300, width: 1.5)
+                          : BorderSide(color: Colors.transparent),
+                    ),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 16.0, horizontal: 16.0),
+                      child: Row(
+                        children: [
+                          Radio<int>(
+                            value: index,
+                            groupValue: _selectedPlanIndex,
+                            onChanged: (v) => setState(() => _selectedPlanIndex = v ?? 0),
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  plan.title,
+                                  style: TextStyle(
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.bold,
+                                    color: Colors.purple.shade700,
+                                  ),
+                                ),
+                                const SizedBox(height: 6),
+                                Text(
+                                  plan.subtitle,
+                                  style: TextStyle(fontSize: 13, color: Colors.grey.shade600),
+                                ),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          ElevatedButton(
+                            onPressed: isLoading
+                                ? null
+                                : () {
+                              setState(() => _selectedPlanIndex = index);
+                              _startQPayPaymentForSelectedPlan();
+                            },
+                            style: ElevatedButton.styleFrom(
+                              padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 14),
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                              backgroundColor: Colors.purple,
+                              foregroundColor: Colors.white,
+                            ),
+                            child: isLoading
+                                ? const SizedBox(
+                              width: 18,
+                              height: 18,
+                              child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
+                            )
+                                : Text('Pay ₹${plan.amount}'),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              );
+            }),
+
+            const SizedBox(height: 12),
+
+            // Main Pay button (duplicates convenience to pay selected plan)
             ElevatedButton.icon(
-              onPressed: isLoading ? null : _startQPayPayment,
+              onPressed: isLoading ? null : _startQPayPaymentForSelectedPlan,
               icon: isLoading
                   ? const SizedBox(
-                      width: 20,
-                      height: 20,
-                      child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
-                    )
+                width: 20,
+                height: 20,
+                child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
+              )
                   : const Icon(Icons.payment),
-              label: Text(isLoading ? 'Processing ₹$fixedAmount...' : 'Pay ₹$fixedAmount'),
+              label: Text(isLoading
+                  ? 'Processing ₹${_plans[_selectedPlanIndex].amount}...'
+                  : 'Pay ₹${_plans[_selectedPlanIndex].amount}'),
               style: ElevatedButton.styleFrom(
                 padding: const EdgeInsets.symmetric(vertical: 16),
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                backgroundColor: Colors.indigo,
+                backgroundColor: Colors.purple,
                 foregroundColor: Colors.white,
               ),
             ),
-            
+
             const SizedBox(height: 20),
-            
+
             const Center(
               child: Text(
                 'Your balance will update automatically after you return to the app.',
@@ -240,4 +301,19 @@ class _BankPageState extends ConsumerState<BankPage> with WidgetsBindingObserver
       ),
     );
   }
+}
+
+/// Simple plan model used in this screen
+class _Plan {
+  final int amount;
+  final int id; // QPay payment link id
+  final String title;
+  final String subtitle;
+
+  const _Plan({
+    required this.amount,
+    required this.id,
+    required this.title,
+    required this.subtitle,
+  });
 }

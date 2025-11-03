@@ -24,9 +24,6 @@ class CommissionRate {
 class CommissionRatesPage extends StatelessWidget {
   const CommissionRatesPage({super.key});
 
-  /// Authoritative list of networks we show in India.
-  /// Removed old / non-existing networks (e.g. separate 'Vodafone' and 'Idea', 'Videocon' DTH).
-  /// If you want to add/remove networks, edit this list.
   List<CommissionRate> _buildRates() {
     return <CommissionRate>[
       // Telecom
@@ -157,7 +154,6 @@ class CommissionRatesPage extends StatelessWidget {
                   ),
                   const SizedBox(height: 4),
                   Text(
-                    // Show user rate exactly half of distributor rate
                     '${item.userRate.toStringAsFixed(2)}%',
                     style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
                   ),

@@ -5,7 +5,12 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:powerpay/providers/recharge_controller.dart';
 import 'package:powerpay/services/api_mapper_service.dart';
-import 'payment_webview_screen.dart'; // <<-- existing import
+import 'payment_webview_screen.dart'; // existing import
+
+// New imports for wallet interaction and wallet page navigation
+import '../services/wallet_service.dart' show walletServiceProvider;
+import 'bank_page.dart';
+import '../providers/wallet_provider.dart'; // to read walletBalanceProvider
 
 class RechargePage extends ConsumerStatefulWidget {
   const RechargePage({super.key});
@@ -17,6 +22,9 @@ class RechargePage extends ConsumerStatefulWidget {
 class _RechargePageState extends ConsumerState<RechargePage> {
   late final TextEditingController _numberController;
   late final TextEditingController _amountController;
+
+  // local processing flag (used instead of controller.setLoading)
+  bool _isProcessing = false;
 
   // --- Category definitions (UNCHANGED) ---
   static const Map<String, List<String>> _operatorCategories = {
@@ -52,7 +60,134 @@ class _RechargePageState extends ConsumerState<RechargePage> {
     super.dispose();
   }
 
-  // --- WIDGET: Input Section (UNCHANGED) ---
+  // Helper: robustly parse different wallet provider value shapes into a double
+  double _parseWalletValueSafe(Object? walletProvValue) {
+    try {
+      // Case: Riverpod AsyncValue<T>
+      if (walletProvValue is AsyncValue) {
+        final val = walletProvValue.value;
+        if (val is num) {
+          return val.toDouble();
+        } else if (val is String) {
+          return double.tryParse(val) ?? 0.0;
+        } else {
+          return 0.0;
+        }
+      }
+
+      // Case: numeric type directly
+      if (walletProvValue is num) {
+        return walletProvValue.toDouble();
+      }
+
+      // Case: String containing a number
+      if (walletProvValue is String) {
+        return double.tryParse(walletProvValue) ?? 0.0;
+      }
+
+      // Anything else (including null)
+      return 0.0;
+    } catch (e) {
+      debugPrint('[RechargePage] _parseWalletValueSafe error: $e');
+      return 0.0;
+    }
+  }
+
+  // New: Check wallet and perform recharge if enough balance
+  Future<void> _payUsingWallet({
+    required String number,
+    required int amount,
+    required RechargeController controller,
+  }) async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please login to continue')),
+      );
+      return;
+    }
+
+    setState(() => _isProcessing = true);
+
+    try {
+      // Read whatever the wallet provider exposes and parse it safely
+      Object? walletProvValue;
+      try {
+        walletProvValue = ref.read(walletBalanceProvider);
+      } catch (e) {
+        debugPrint('[RechargePage] reading walletBalanceProvider threw: $e');
+        walletProvValue = null;
+      }
+
+      final double balance = _parseWalletValueSafe(walletProvValue);
+
+      debugPrint('[RechargePage] user=${user.uid} walletBalance=$balance required=$amount');
+
+      if (balance >= amount) {
+        // Enough balance → perform recharge. We don't assume performRecharge returns a value.
+        await controller.performRecharge(number: number, amount: amount, uid: user.uid);
+
+        // Clear inputs and refresh wallet provider (so UI shows updated balance)
+        _amountController.clear();
+        _numberController.clear();
+        ref.invalidate(walletBalanceProvider);
+
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Recharge initiated / completed successfully')),
+        );
+      } else {
+        // Insufficient
+        final shortage = (amount - balance).ceil();
+        if (!mounted) return;
+        // Show dialog that navigates to wallet recharge (BankPage)
+        await showDialog<void>(
+          context: context,
+          builder: (ctx) {
+            return AlertDialog(
+              title: const Text('Insufficient Wallet Balance'),
+              content: Text(
+                'Your wallet has ₹${balance.toStringAsFixed(2)} but the recharge requires ₹$amount.\n'
+                    'You need ₹$shortage more. Would you like to add money to your wallet now?',
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(ctx).pop(),
+                  child: const Text('Cancel'),
+                ),
+                ElevatedButton(
+                  onPressed: () {
+                    Navigator.of(ctx).pop();
+                    Navigator.of(context).push(
+                      MaterialPageRoute(builder: (_) => const BankPage()),
+                    );
+                  },
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Theme.of(context).colorScheme.primary,
+                    foregroundColor: Colors.white, // ✅ makes text white
+                  ),
+                  child: const Text('Add Money'),
+                ),
+              ],
+            );
+          },
+        );
+      }
+    } catch (e, st) {
+      debugPrint('[RechargePage] _payUsingWallet error: $e\n$st');
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Payment error: $e')),
+      );
+    } finally {
+      setState(() => _isProcessing = false);
+      // Ensure wallet balance refresh
+      ref.invalidate(walletBalanceProvider);
+    }
+  }
+
+  // --- WIDGET: Input Section (UNCHANGED except wiring pay to wallet) ---
   Widget _buildInputSection(RechargeState state, RechargeController controller) {
     final border12 = OutlineInputBorder(borderRadius: BorderRadius.circular(12));
 
@@ -71,9 +206,9 @@ class _RechargePageState extends ConsumerState<RechargePage> {
             Text(
               'Enter Recharge Details',
               style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                    fontWeight: FontWeight.bold,
-                    color: Theme.of(context).primaryColor, // Use primary color
-                  ),
+                fontWeight: FontWeight.bold,
+                color: Theme.of(context).primaryColor, // Use primary color
+              ),
             ),
             const SizedBox(height: 16), // Space after title
 
@@ -136,71 +271,50 @@ class _RechargePageState extends ConsumerState<RechargePage> {
             ),
             const SizedBox(height: 16), // Increased space
             ElevatedButton(
-              onPressed: state.isLoading
+              onPressed: (state.isLoading || _isProcessing)
                   ? null
                   : () async {
-                      // --- Validation Logic (UNCHANGED) ---
-                      final user = FirebaseAuth.instance.currentUser;
-                      final amount = int.tryParse(_amountController.text) ?? 0;
-                      final number = _numberController.text.trim();
+                // --- Validation Logic (UNCHANGED) ---
+                final user = FirebaseAuth.instance.currentUser;
+                final amount = int.tryParse(_amountController.text) ?? 0;
+                final number = _numberController.text.trim();
 
-                      if (user == null) {
-                        if (!mounted) return;
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(content: Text('Please login to continue')),
-                        );
-                        return;
-                      }
-                      if (amount <= 0) {
-                        if (!mounted) return;
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(content: Text('Enter a valid amount')),
-                        );
-                        return;
-                      }
-                      if (number.length != 10) {
-                        if (!mounted) return;
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(content: Text('Enter a valid 10-digit mobile number')),
-                        );
-                        return;
-                      }
+                if (user == null) {
+                  if (!mounted) return;
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Please login to continue')),
+                  );
+                  return;
+                }
+                if (amount <= 0) {
+                  if (!mounted) return;
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Enter a valid amount')),
+                  );
+                  return;
+                }
+                if (number.length != 10) {
+                  if (!mounted) return;
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Enter a valid 10-digit mobile number')),
+                  );
+                  return;
+                }
 
-                      // --- PAYMENT NAVIGATION TEMPORARILY DISABLED ---
-                      // final paymentUrl = '$_fallbackPaymentShortlink?amount=$amount&number=$number';
-                      // final confirmed = await Navigator.of(context).push<bool>(
-                      //   MaterialPageRoute(
-                      //     builder: (_) => PaymentWebViewScreen(initialUrl: paymentUrl),
-                      //   ),
-                      // );
-                      // if (confirmed == true) {
-                      //   controller.performRecharge(number: number, amount: amount, uid: user.uid);
-                      //   _amountController.clear();
-                      //   _numberController.clear();
-                      // } else {
-                      //   if (!mounted) return;
-                      //   ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Payment not completed')));
-                      // }
-                      // --- END OF DISABLED SECTION ---
-
-                      // --- NEW PLACEHOLDER ---
-                      if (!mounted) return;
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('Payment logic will be added later.')),
-                      );
-                      // --- END NEW PLACEHOLDER ---
-                    },
+                // New behavior: try to pay from wallet, otherwise prompt to recharge wallet
+                await _payUsingWallet(number: number, amount: amount, controller: controller);
+              },
               style: ElevatedButton.styleFrom(
                 padding: const EdgeInsets.symmetric(vertical: 14),
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                 minimumSize: const Size(double.infinity, 50),
               ),
-              child: state.isLoading
+              child: (state.isLoading || _isProcessing)
                   ? const SizedBox(
-                      height: 22,
-                      width: 22,
-                      child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
-                    )
+                height: 22,
+                width: 22,
+                child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
+              )
                   : const Text('Pay Now', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
             ),
           ],
@@ -270,7 +384,6 @@ class _RechargePageState extends ConsumerState<RechargePage> {
     );
   }
 
-
   @override
   Widget build(BuildContext context) {
     final state = ref.watch(rechargeControllerProvider);
@@ -279,7 +392,7 @@ class _RechargePageState extends ConsumerState<RechargePage> {
     // --- Listeners (UNCHANGED) ---
     ref.listen<String?>(
       rechargeControllerProvider.select((s) => s.selectedOperator),
-      (previous, next) {
+          (previous, next) {
         if (previous != next && next != null) {
           setState(() {
             _selectedCategory = "All"; // Always reset to All
@@ -294,7 +407,6 @@ class _RechargePageState extends ConsumerState<RechargePage> {
         );
       }
     });
-    // --- End Listeners ---
 
     // --- Derivations (UNCHANGED) ---
     final List<String> currentCategories =
@@ -316,136 +428,126 @@ class _RechargePageState extends ConsumerState<RechargePage> {
       }
       return desc.contains(category);
     }).toList();
-    // --- End Derivations ---
 
     return Scaffold(
       appBar: AppBar(title: const Text('Mobile Recharge')),
       body: SafeArea(
-        // --- Make the whole page scrollable (UNCHANGED) ---
         child: SingleChildScrollView(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              // --- 1. The Fixed Top Section ---
               _buildInputSection(state, controller),
-
-              // --- 2. & 3. CONDITIONAL FILTERS AND PLANS (UNCHANGED) ---
               if (areInputsValid) ...[
-                // --- 2. The Filter Chips ---
                 _buildFilterChips(currentCategories),
                 const Divider(height: 1),
-
-                // --- 3. The Scrollable Bottom Section ---
                 state.isLoading && state.plans.isEmpty
                     ? const Center(
-                        child: Padding(
-                          padding: EdgeInsets.symmetric(vertical: 48.0),
-                          child: CircularProgressIndicator(),
-                        ),
-                      )
+                  child: Padding(
+                    padding: EdgeInsets.symmetric(vertical: 48.0),
+                    child: CircularProgressIndicator(),
+                  ),
+                )
                     : displayedPlans.isNotEmpty
-                        ? ListView.builder(
-                            shrinkWrap: true,
-                            physics: const NeverScrollableScrollPhysics(),
-                            padding: const EdgeInsets.all(16),
-                            itemCount: displayedPlans.length,
-                            itemBuilder: (context, index) {
-                              // ... (Plan card UI is UNCHANGED) ...
-                              final plan = displayedPlans[index]; 
-                              final String price = (plan['rs'] ?? '0').toString();
-                              final String description = (plan['desc'] ?? 'No description available').toString();
-                              final String validity = (plan['validity'] ?? '').toString();
-                              final List<String> tags = [];
-                              final descLower = description.toLowerCase();
-                              if (descLower.contains('unlimited')) tags.add('UNLIMITED');
-                              if (descLower.contains('data')) tags.add('DATA');
-                              if (descLower.contains('sms')) tags.add('SMS');
-                              
-                              return Card(
-                                elevation: 1.5,
-                                shadowColor: Colors.grey.shade50,
-                                margin: const EdgeInsets.only(bottom: 10),
-                                clipBehavior: Clip.antiAlias,
-                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                                child: InkWell(
-                                  onTap: () {
-                                    _amountController.text = price;
-                                  },
-                                  child: Padding(
-                                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 16),
-                                    child: Row(
-                                      crossAxisAlignment: CrossAxisAlignment.center,
-                                      children: [
-                                        SizedBox(
-                                          width: 80,
-                                          child: Column(
-                                            mainAxisAlignment: MainAxisAlignment.center,
-                                            children: [
-                                              CircleAvatar(
-                                                radius: 28,
-                                                backgroundColor: Colors.grey.shade100,
-                                                child: Text(
-                                                  '₹ $price',
-                                                  style: const TextStyle(
-                                                    fontSize: 18,
-                                                    fontWeight: FontWeight.w600,
-                                                    color: Colors.black87,
-                                                  ),
-                                                ),
-                                              ),
-                                              if (validity.isNotEmpty) ...[
-                                                const SizedBox(height: 6),
-                                                Text(
-                                                  validity,
-                                                  textAlign: TextAlign.center,
-                                                  style: TextStyle(
-                                                    fontSize: 13,
-                                                    color: Colors.grey.shade700,
-                                                  ),
-                                                ),
-                                              ]
-                                            ],
-                                          ),
+                    ? ListView.builder(
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
+                  padding: const EdgeInsets.all(16),
+                  itemCount: displayedPlans.length,
+                  itemBuilder: (context, index) {
+                    final plan = displayedPlans[index];
+                    final String price = (plan['rs'] ?? '0').toString();
+                    final String description = (plan['desc'] ?? 'No description available').toString();
+                    final String validity = (plan['validity'] ?? '').toString();
+                    final List<String> tags = [];
+                    final descLower = description.toLowerCase();
+                    if (descLower.contains('unlimited')) tags.add('UNLIMITED');
+                    if (descLower.contains('data')) tags.add('DATA');
+                    if (descLower.contains('sms')) tags.add('SMS');
+
+                    return Card(
+                      elevation: 1.5,
+                      shadowColor: Colors.grey.shade50,
+                      margin: const EdgeInsets.only(bottom: 10),
+                      clipBehavior: Clip.antiAlias,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      child: InkWell(
+                        onTap: () {
+                          _amountController.text = price;
+                        },
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 16),
+                          child: Row(
+                            crossAxisAlignment: CrossAxisAlignment.center,
+                            children: [
+                              SizedBox(
+                                width: 80,
+                                child: Column(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    CircleAvatar(
+                                      radius: 28,
+                                      backgroundColor: Colors.grey.shade100,
+                                      child: Text(
+                                        '₹ $price',
+                                        style: const TextStyle(
+                                          fontSize: 18,
+                                          fontWeight: FontWeight.w600,
+                                          color: Colors.black87,
                                         ),
-                                        Expanded(
-                                          child: Padding(
-                                            padding: const EdgeInsets.only(left: 12.0),
-                                            child: Column(
-                                              crossAxisAlignment: CrossAxisAlignment.start,
-                                              mainAxisAlignment: MainAxisAlignment.center,
-                                              children: [
-                                                if (tags.isNotEmpty)
-                                                  Wrap(
-                                                    spacing: 6.0,
-                                                    runSpacing: 4.0,
-                                                    children: tags
-                                                        .map((tag) => _buildPlanTag(tag))
-                                                        .toList(),
-                                                  ),
-                                                if (tags.isNotEmpty) const SizedBox(height: 8),
-                                                Text(
-                                                  description,
-                                                  style: const TextStyle(fontSize: 14.5, height: 1.4),
-                                                ),
-                                              ],
-                                            ),
-                                          ),
-                                        ),
-                                      ],
+                                      ),
                                     ),
+                                    if (validity.isNotEmpty) ...[
+                                      const SizedBox(height: 6),
+                                      Text(
+                                        validity,
+                                        textAlign: TextAlign.center,
+                                        style: TextStyle(
+                                          fontSize: 13,
+                                          color: Colors.grey.shade700,
+                                        ),
+                                      ),
+                                    ]
+                                  ],
+                                ),
+                              ),
+                              Expanded(
+                                child: Padding(
+                                  padding: const EdgeInsets.only(left: 12.0),
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    mainAxisAlignment: MainAxisAlignment.center,
+                                    children: [
+                                      if (tags.isNotEmpty)
+                                        Wrap(
+                                          spacing: 6.0,
+                                          runSpacing: 4.0,
+                                          children: tags
+                                              .map((tag) => _buildPlanTag(tag))
+                                              .toList(),
+                                        ),
+                                      if (tags.isNotEmpty) const SizedBox(height: 8),
+                                      Text(
+                                        description,
+                                        style: const TextStyle(fontSize: 14.5, height: 1.4),
+                                      ),
+                                    ],
                                   ),
                                 ),
-                              );
-                            },
-                          )
-                        : Center(
-                            child: Padding(
-                              padding: const EdgeInsets.symmetric(vertical: 48.0),
-                              child: Text('No plans found for "$_selectedCategory"'),
-                            ),
+                              ),
+                            ],
                           ),
+                        ),
+                      ),
+                    );
+                  },
+                )
+                    : Center(
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 48.0),
+                    child: Text('No plans found for "$_selectedCategory"'),
+                  ),
+                ),
               ] else ...[
-                // --- Placeholder when inputs are not valid ---
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 48.0),
                   child: Text(
@@ -455,7 +557,6 @@ class _RechargePageState extends ConsumerState<RechargePage> {
                   ),
                 ),
               ],
-              // --- END OF CONDITIONAL SECTION ---
             ],
           ),
         ),
