@@ -12,7 +12,28 @@
           "package_name": "com.services.power_pay"
         }
       },
-      "oauth_client": [],
+      "oauth_client": [
+        {
+          "client_id": "224888229405-6spr9jpd6dqog9k51r1m6cposcmnv2rj.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.services.power_pay",
+            "certificate_hash": "1f86e1ed4995cf2d1d29ae9573f0574750ca0c0a"
+          }
+        },
+        {
+          "client_id": "224888229405-to63gdngm86kiejn59kprh2479tktmem.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.services.power_pay",
+            "certificate_hash": "6ad10e51dab05005f8b372b4942aba3e6d3317ef"
+          }
+        },
+        {
+          "client_id": "224888229405-qt06tnv7vn6bqb1n9lem848l949adcr0.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
       "api_key": [
         {
           "current_key": "AIzaSyBT-E6FLsKR3SOiH2obq_h2xZjqFWfziEg"
@@ -20,7 +41,19 @@
       ],
       "services": {
         "appinvite_service": {
-          "other_platform_oauth_client": []
+          "other_platform_oauth_client": [
+            {
+              "client_id": "224888229405-qt06tnv7vn6bqb1n9lem848l949adcr0.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "224888229405-4qkcf11kncg2cqk770pibds00fldrp37.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.services.power_pay"
+              }
+            }
+          ]
         }
       }
     }

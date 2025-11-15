@@ -98,3 +98,139 @@ exports.deleteUserByAdminHttp = functions.https.onRequest(async (req, res) => {
     return res.status(code === 401 ? 401 : code === 403 ? 403 : 500).json({ error: msg });
   }
 });
+
+/**
+ * Callable function: transferWallet
+ * - data: { toUserId: string, amount: number, toUserName?: string }
+ * - checks caller is in distributors_by_uid
+ * - updates walletBalance atomically (prefers users -> wallets -> distributors)
+ * - writes wallet_transactions and distributor_payments logs
+ */
+exports.transferWallet = functions.https.onCall(async (data, context) => {
+  try {
+    if (!context.auth) {
+      throw new functions.https.HttpsError('unauthenticated', 'User must be logged in.');
+    }
+    const distributorUid = context.auth.uid;
+
+    const toUserId = data && data.toUserId ? String(data.toUserId) : '';
+    const amount = Number(data && data.amount ? data.amount : 0);
+    const toUserName = data && data.toUserName ? String(data.toUserName) : null;
+
+    if (!toUserId || isNaN(amount) || amount <= 0) {
+      throw new functions.https.HttpsError('invalid-argument', 'Invalid toUserId or amount.');
+    }
+    if (amount < 10) {
+      throw new functions.https.HttpsError('failed-precondition', 'Minimum transfer is ₹10.');
+    }
+
+    const db = admin.firestore();
+
+    // Verify distributor exists in index
+    const idxSnap = await db.collection('distributors_by_uid').doc(distributorUid).get();
+    if (!idxSnap.exists) {
+      throw new functions.https.HttpsError('permission-denied', 'Caller is not a distributor.');
+    }
+
+    // helper to detect where balance is stored
+    async function detectBalanceDocRef(uid) {
+      const candidates = [
+        db.collection('users').doc(uid),
+        db.collection('wallets').doc(uid),
+        db.collection('distributors').doc(uid)
+      ];
+      for (const ref of candidates) {
+        const snap = await ref.get();
+        if (snap.exists) return ref;
+      }
+      return db.collection('users').doc(uid); // default
+    }
+
+    const distributorRef = await detectBalanceDocRef(distributorUid);
+    const userRef = await detectBalanceDocRef(toUserId);
+    const txLogRef = db.collection('wallet_transactions').doc();
+    const distributorPaymentRef = db.collection('distributor_payments').doc();
+
+    const parseBalanceFromData = (d) => {
+      if (!d) return 0;
+      const raw = (d.walletBalance !== undefined) ? d.walletBalance
+                : (d.balance !== undefined) ? d.balance
+                : 0;
+      if (typeof raw === 'number') return raw;
+      const cleaned = String(raw).replace(/[^\d\.-]/g, '');
+      const n = Number(cleaned);
+      return isNaN(n) ? 0 : n;
+    };
+
+    await db.runTransaction(async (tx) => {
+      const distSnap = await tx.get(distributorRef);
+      const userSnap = await tx.get(userRef);
+
+      const distData = distSnap.exists ? distSnap.data() : null;
+      const userData = userSnap.exists ? userSnap.data() : null;
+
+      const distBal = parseBalanceFromData(distData);
+      const userBal = parseBalanceFromData(userData);
+
+      if (distBal < amount) {
+        throw new functions.https.HttpsError('failed-precondition',
+          `insufficient-funds: distributor has ₹${distBal} (requested ₹${amount})`);
+      }
+
+      if (!distSnap.exists) {
+        tx.set(distributorRef, {
+          walletBalance: 0,
+          ownerId: distributorUid,
+          role: 'distributor',
+          createdAt: admin.firestore.FieldValue.serverTimestamp()
+        });
+      }
+      if (!userSnap.exists) {
+        tx.set(userRef, {
+          walletBalance: 0,
+          ownerId: toUserId,
+          createdAt: admin.firestore.FieldValue.serverTimestamp()
+        });
+      }
+
+      tx.update(distributorRef, {
+        walletBalance: distBal - amount,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp()
+      });
+
+      tx.update(userRef, {
+        walletBalance: userBal + amount,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp()
+      });
+
+      tx.set(txLogRef, {
+        type: 'transfer',
+        fromUserId: distributorUid,
+        fromUserEmail: context.auth.token.email || null,
+        toUserId,
+        toUserName,
+        amount,
+        description: 'Distributor recharge for user',
+        timestamp: admin.firestore.FieldValue.serverTimestamp(),
+        status: 'completed'
+      });
+
+      tx.set(distributorPaymentRef, {
+        userId: toUserId,
+        userName: toUserName,
+        amount,
+        distributorId: distributorUid,
+        distributorEmail: context.auth.token.email || null,
+        timestamp: admin.firestore.FieldValue.serverTimestamp(),
+        status: 'completed',
+        type: 'wallet_transfer'
+      });
+    });
+
+    return { success: true, message: `Transferred ₹${amount} to ${toUserId}` };
+  } catch (err) {
+    if (err instanceof functions.https.HttpsError) throw err;
+    console.error('transferWallet error:', err);
+    throw new functions.https.HttpsError('internal', err.message || String(err));
+  }
+});

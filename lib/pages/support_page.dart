@@ -26,7 +26,7 @@ class SupportPage extends StatelessWidget {
 
     if (!await launchUrl(emailUri, mode: LaunchMode.externalApplication)) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Could not open email app')),
+        const SnackBar(content: Text('Could not open email app')),
       );
     }
   }
@@ -40,7 +40,20 @@ class SupportPage extends StatelessWidget {
 
     if (!await launchUrl(phoneUri, mode: LaunchMode.externalApplication)) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Could not open dialer')),
+        const SnackBar(content: Text('Could not open dialer')),
+      );
+    }
+  }
+
+  // --- Utility: launch WhatsApp chat ---
+  Future<void> _launchWhatsApp(BuildContext context, String phoneWithCountryCode) async {
+    // phoneWithCountryCode should be like '919360559979' (no +, no spaces)
+    final String message = Uri.encodeComponent("Hello, I need help with...");
+    final Uri waUri = Uri.parse("https://wa.me/$phoneWithCountryCode?text=$message");
+
+    if (!await launchUrl(waUri, mode: LaunchMode.externalApplication)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Could not open WhatsApp')),
       );
     }
   }
@@ -48,10 +61,13 @@ class SupportPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     // Define contact points
-    const String supportEmail = "rajeshcr72463@gmail.com";
-    const String refundsEmail = "refunds@powerpay.in";
-    const String displayHelplineNumber = "+91 1800 555 1234";
-    const String helplineNumber = "18005551234";
+    const String supportEmail = "powerpay.112025@gmail.com";
+    const String refundsEmail = "powerpay.112025@gmail.com";
+    const String displayHelplineNumber = "+91 9560559979";
+    const String helplineNumber = "84288 19336";
+
+    // WhatsApp number (with country code, no + or spaces) - using the number you provided
+    const String whatsappNumberForUrl = "919360559979"; // +91 9360559979
 
     return Scaffold(
       backgroundColor: lightBg,
@@ -124,6 +140,18 @@ class SupportPage extends StatelessWidget {
               action: () => _launchPhone(context, helplineNumber),
             ),
 
+            const SizedBox(height: 20),
+
+            // --- 4. WhatsApp Chat ---
+            _buildInfoSection(
+              context: context,
+              icon: FontAwesomeIcons.whatsapp,
+              title: "Chat with us on WhatsApp",
+              detail: "+91 9360559979",
+              detailColor: const Color(0xFF25D366), // WhatsApp green
+              action: () => _launchWhatsApp(context, whatsappNumberForUrl),
+            ),
+
             const SizedBox(height: 40),
             Center(
               child: Text(
@@ -138,7 +166,6 @@ class SupportPage extends StatelessWidget {
           ],
         ),
       ),
-
     );
   }
 
@@ -211,7 +238,7 @@ class SupportPage extends StatelessWidget {
 
             // Action Icon
             Icon(
-              (icon == FontAwesomeIcons.phoneVolume) ? Icons.call : Icons.email,
+              (icon == FontAwesomeIcons.phoneVolume) ? Icons.call : Icons.arrow_forward_ios,
               size: 20,
               color: textLight,
             ),

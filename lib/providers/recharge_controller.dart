@@ -82,7 +82,7 @@ class RechargeController extends StateNotifier<RechargeState> {
       return;
     }
 
-    final txService = ref.read(transactionServiceProvider);
+    final txService = ref.read(transactionServiceProvider as ProviderListenable);
     String? transactionId;
     try {
       transactionId = await txService.createPending(number: number, operatorName: state.selectedOperator!, amount: amount);

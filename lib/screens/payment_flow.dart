@@ -1,8 +1,7 @@
 // lib/screens/payment_flow.dart
-import 'package:cloud_firestore/cloud_firestore.dart';
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:webview_flutter/webview_flutter.dart';
-import 'main_screen.dart'; // <-- update path if MainScreen is elsewhere
 
 class PaymentFlow extends StatefulWidget {
   final String uid;
@@ -24,71 +23,87 @@ class _PaymentFlowState extends State<PaymentFlow> {
   late final WebViewController _controller;
   bool _isLoading = true;
   bool _alreadyHandledSuccess = false;
-  bool _manualProcessing = false;
+  String _capturedPaymentId = '';
 
   @override
   void initState() {
     super.initState();
 
+    // NOTE:
+    // We intentionally DON'T set WebView.platform = AndroidWebView() or WebKitWebView()
+    // here because those classes live in separate packages (webview_flutter_android / webview_flutter_wkwebview)
+    // and referencing them directly causes "undefined" errors if the platform packages are not added.
+    //
+    // The WebViewController + WebViewWidget approach works with the main webview_flutter package.
+    // If you DO want to use the platform-specific controllers (for advanced features), add the
+    // platform packages to pubspec.yaml and reintroduce the platform assignment.
+
     _controller = WebViewController()
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
-      ..setNavigationDelegate(NavigationDelegate(
-        onPageStarted: (url) {
-          setState(() => _isLoading = true);
-        },
-        onPageFinished: (url) {
-          setState(() => _isLoading = false);
-        },
-        onNavigationRequest: (req) {
-          final url = req.url.toLowerCase();
+      ..setNavigationDelegate(
+        NavigationDelegate(
+          onPageStarted: (String url) {
+            setState(() => _isLoading = true);
+          },
+          onPageFinished: (String url) {
+            setState(() => _isLoading = false);
+          },
+          onNavigationRequest: (NavigationRequest nav) {
+            final url = nav.url;
+            final low = url.toLowerCase();
 
-          // Heuristics for detecting payment success — customize if QPay gives a specific callback URL.
-          final looksLikeSuccess = url.contains('success') ||
-              url.contains('status=success') ||
-              url.contains('paymentstatus=success') ||
-              url.contains('payment_success') ||
-              url.contains('txnstatus=success') ||
-              (url.contains('txnid=') && url.contains('status'));
+            // Heuristics for success and cancel. Tune these to the exact QPay redirect URLs/params.
+            final looksLikeSuccess = low.contains('status=success') ||
+                low.contains('/success') ||
+                low.contains('paymentstatus=success') ||
+                low.contains('payment_success') ||
+                low.contains('txnstatus=success') ||
+                (low.contains('txnid=') && low.contains('status'));
 
-          if (looksLikeSuccess && !_alreadyHandledSuccess) {
-            _alreadyHandledSuccess = true;
-            _confirmPaymentAndEnterApp(auto: true);
-            return NavigationDecision.prevent;
-          }
+            final looksLikeCancel = low.contains('status=cancel') ||
+                low.contains('/cancel') ||
+                low.contains('payment_cancel');
 
-          return NavigationDecision.navigate;
-        },
-      ))
+            if (looksLikeCancel && !_alreadyHandledSuccess) {
+              _alreadyHandledSuccess = true;
+              if (mounted) Navigator.of(context).pop(false);
+              return NavigationDecision.prevent;
+            }
+
+            if (looksLikeSuccess && !_alreadyHandledSuccess) {
+              _alreadyHandledSuccess = true;
+
+              // Try to parse paymentId from common query param names.
+              try {
+                final uri = Uri.parse(url);
+                final qp = uri.queryParameters;
+                final paymentId = qp['paymentId'] ??
+                    qp['transactionId'] ??
+                    qp['txnid'] ??
+                    qp['txnId'] ??
+                    qp['id'] ??
+                    '';
+
+                _capturedPaymentId = paymentId;
+              } catch (_) {
+                _capturedPaymentId = '';
+              }
+
+              if (mounted) {
+                Navigator.of(context).pop({
+                  'success': true,
+                  'paymentId': _capturedPaymentId,
+                  'rawRedirect': url,
+                });
+              }
+              return NavigationDecision.prevent;
+            }
+
+            return NavigationDecision.navigate;
+          },
+        ),
+      )
       ..loadRequest(Uri.parse(widget.paymentUrl));
-  }
-
-  Future<void> _confirmPaymentAndEnterApp({required bool auto}) async {
-    if (_manualProcessing) return;
-    setState(() => _manualProcessing = true);
-    try {
-      // Update Firestore
-      await FirebaseFirestore.instance.collection('users').doc(widget.uid).update({
-        'subscriptionPaid': true,
-        'subscriptionPaidAt': FieldValue.serverTimestamp(),
-      });
-
-      // Show message and navigate into the app
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(auto ? 'Payment confirmed automatically.' : 'Payment marked as completed.')),
-      );
-
-      // Replace stack with MainScreen
-      if (!mounted) return;
-      Navigator.of(context).pushReplacement(
-        MaterialPageRoute(builder: (_) => const MainScreen()),
-      );
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed to confirm payment: $e')));
-    } finally {
-      if (mounted) setState(() => _manualProcessing = false);
-    }
   }
 
   @override
@@ -98,27 +113,18 @@ class _PaymentFlowState extends State<PaymentFlow> {
       appBar: AppBar(
         title: Text('Pay $price to access app'),
         automaticallyImplyLeading: false,
+        leading: IconButton(
+          icon: const Icon(Icons.close),
+          onPressed: () {
+            // Indicate cancellation
+            Navigator.of(context).pop(false);
+          },
+        ),
       ),
-      body: Column(
+      body: Stack(
         children: [
-          Expanded(child: Stack(
-            children: [
-              WebViewWidget(controller: _controller),
-              if (_isLoading) const Center(child: CircularProgressIndicator()),
-            ],
-          )),
-          Padding(
-            padding: const EdgeInsets.all(12.0),
-            child: SizedBox(
-              width: double.infinity,
-              child: ElevatedButton(
-                onPressed: _manualProcessing ? null : () => _confirmPaymentAndEnterApp(auto: false),
-                child: _manualProcessing
-                    ? const SizedBox(height: 18, width: 18, child: CircularProgressIndicator(strokeWidth: 2))
-                    : const Text('I have completed payment'),
-              ),
-            ),
-          ),
+          WebViewWidget(controller: _controller),
+          if (_isLoading) const Center(child: CircularProgressIndicator()),
         ],
       ),
     );

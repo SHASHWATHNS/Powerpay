@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:powerpay/pages/commission_rates_page.dart';
 import 'package:powerpay/pages/home_page.dart';
 import 'package:powerpay/pages/support_page.dart';
 import 'package:powerpay/pages/bank_page.dart'; // Renamed import to avoid conflict
@@ -155,14 +156,14 @@ class MainScreen extends ConsumerWidget {
                   Navigator.push(context, MaterialPageRoute(builder: (_) => const WalletLedgerPage()));
                 },
               ),
-              ListTile(
-                leading: const Icon(Icons.history, color: primaryText),
-                title: const Text('History', style: TextStyle(color: primaryText)),
-                onTap: () {
-                  Navigator.pop(context);
-                  Navigator.push(context, MaterialPageRoute(builder: (_) => const TransactionHistoryPage()));
-                },
-              ),
+              //ListTile(
+                //leading: const Icon(Icons.history, color: primaryText),
+                //title: const Text('History', style: TextStyle(color: primaryText)),
+                //onTap: () {
+                  //Navigator.pop(context);
+                  //Navigator.push(context, MaterialPageRoute(builder: (_) => const TransactionHistoryPage()));
+                //},
+              //),
 
               const Spacer(),
               const Divider(height: 1),

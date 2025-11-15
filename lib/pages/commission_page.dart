@@ -1,172 +1,60 @@
-// lib/pages/commission_rates_page.dart
-import 'package:flutter/material.dart';
+// lib/services/api_mapper_service.dart
 
-/// CommissionRate holds distributor's commission and derives the user's commission (half).
-class CommissionRate {
-  final String id; // machine id (useful if you fetch from backend)
-  final String operatorName;
-  final double distributorRate; // e.g. 2.00 means 2.00%
-  final String? logoUrl;
-  final IconData? fallbackIcon;
+class ApiMapper {
+  static const List<String> supportedOperators = ['Airtel', 'VI', 'BSNL', 'JIO'];
 
-  CommissionRate({
-    required this.id,
-    required this.operatorName,
-    required this.distributorRate,
-    this.logoUrl,
-    this.fallbackIcon,
-  });
+  static const List<String> supportedCircles = [
+    'Andhra Pradesh', 'Assam', 'Bihar', 'Chennai', 'Delhi', 'Gujarat', 'Haryana',
+    'Himachal Pradesh', 'Jammu And Kashmir', 'Jharkhand', 'Karnataka', 'Kerala',
+    'Kolkata', 'Madhya Pradesh', 'Maharashtra', 'Mumbai', 'North East', 'Orissa',
+    'Punjab', 'Rajasthan', 'Tamil Nadu', 'Tripura', 'UP East', 'UP West', 'West Bengal',
+  ];
 
-  /// User commission must be exactly half of distributor commission numerically.
-  double get userRate => distributorRate / 2.0;
-}
-
-class CommissionRatesPage extends StatelessWidget {
-  const CommissionRatesPage({super.key});
-
-  /// Authoritative list of networks we show in India.
-  /// Removed old / non-existing networks (e.g. separate 'Vodafone' and 'Idea', 'Videocon' DTH).
-  /// If you want to add/remove networks, edit this list.
-  List<CommissionRate> _buildRates() {
-    return <CommissionRate>[
-      // Telecom
-      CommissionRate(
-        id: 'jio',
-        operatorName: 'Jio',
-        distributorRate: 2.00,
-        logoUrl: 'https://logo.clearbit.com/jio.com',
-      ),
-      CommissionRate(
-        id: 'airtel',
-        operatorName: 'Airtel',
-        distributorRate: 2.00,
-        logoUrl: 'https://logo.clearbit.com/airtel.in',
-      ),
-      CommissionRate(
-        id: 'vi',
-        operatorName: 'VI', // Vodafone Idea (brand merged)
-        distributorRate: 2.00,
-        logoUrl: 'https://logo.clearbit.com/vi.com',
-      ),
-      CommissionRate(
-        id: 'bsnl',
-        operatorName: 'BSNL',
-        distributorRate: 0.65,
-        logoUrl: 'https://logo.clearbit.com/bsnl.co.in',
-      ),
-
-      // DTH / TV
-      CommissionRate(
-        id: 'tatasky',
-        operatorName: 'Tata Play (Tata Sky)',
-        distributorRate: 4.30,
-        logoUrl: 'https://logo.clearbit.com/tataplay.com',
-      ),
-      CommissionRate(
-        id: 'dishtv',
-        operatorName: 'Dish TV',
-        distributorRate: 4.40,
-        logoUrl: 'https://logo.clearbit.com/dishtv.in',
-      ),
-      CommissionRate(
-        id: 'airtel_dth',
-        operatorName: 'Airtel Digital TV',
-        distributorRate: 4.20,
-        logoUrl: 'https://logo.clearbit.com/airtel.in',
-      ),
-      CommissionRate(
-        id: 'sundirect',
-        operatorName: 'Sun Direct',
-        distributorRate: 3.50,
-        logoUrl: 'https://logo.clearbit.com/sundirect.in',
-      ),
-
-      // Utility / Others (keep only those that are commonly used)
-      CommissionRate(
-        id: 'fastag',
-        operatorName: 'FASTag Recharge',
-        distributorRate: 0.30,
-        fallbackIcon: Icons.directions_car,
-      ),
-      CommissionRate(
-        id: 'electricity',
-        operatorName: 'Electricity Bill',
-        distributorRate: 0.20,
-        fallbackIcon: Icons.electrical_services,
-      ),
-      CommissionRate(
-        id: 'postpaid',
-        operatorName: 'Postpaid Bill',
-        distributorRate: 0.00,
-        fallbackIcon: Icons.receipt_long,
-      ),
-    ];
+  // Legacy mapping functions used by Flutter UI
+  // These names are intentionally short (operatorToCode / circleToCode)
+  // so they match earlier references in your app.
+  static String? operatorToCode(String? appOperatorName) {
+    if (appOperatorName == null) return null;
+    final n = appOperatorName.trim().toUpperCase();
+    if (n == 'VI' || n == 'VODAFONE IDEA' || n == 'VODAFONE' || n == 'IDEA') return 'V';
+    if (n == 'AIRTEL') return 'A';
+    if (n.contains('BSNL')) return 'BT';
+    if (n.contains('JIO')) return 'RC';
+    // fallback - return null to indicate unknown
+    return null;
   }
 
-  @override
-  Widget build(BuildContext context) {
-    final rates = _buildRates();
+  static String? circleToCode(String? appCircleName) {
+    if (appCircleName == null) return null;
+    final n = appCircleName.trim().toUpperCase();
+    const Map<String, String> mp = {
+      'ANDHRA PRADESH':'24','ASSAM':'17','BIHAR':'12','CHENNAI':'7','DELHI':'5',
+      'GUJARAT':'14','HARYANA':'16','HIMACHAL PRADESH':'4','JAMMU AND KASHMIR':'9',
+      'JHARKHAND':'12','KARNATAKA':'13','KERALA':'25','KOLKATA':'6','MADHYA PRADESH':'21',
+      'MAHARASHTRA':'22','MUMBAI':'3','NORTH EAST':'26','ORISSA':'23','PUNJAB':'1',
+      'RAJASTHAN':'18','TAMIL NADU':'8','TRIPURA':'27','UP EAST':'10','UP WEST':'11','WEST BENGAL':'2'
+    };
+    if (mp.containsKey(n)) return mp[n];
+    // tolerate short forms
+    const alt = {'TN':'8','WB':'2','MP':'21','MH':'22','KA':'13','KL':'25'};
+    if (alt.containsKey(n)) return alt[n];
+    return null;
+  }
 
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Your Commission Rates'),
-      ),
-      body: ListView.separated(
-        padding: const EdgeInsets.all(12.0),
-        itemCount: rates.length,
-        separatorBuilder: (_, __) => const SizedBox(height: 8),
-        itemBuilder: (context, index) {
-          final item = rates[index];
-
-          return Card(
-            elevation: 2,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-            child: ListTile(
-              leading: CircleAvatar(
-                backgroundColor: Colors.white,
-                radius: 22,
-                child: item.logoUrl != null
-                    ? Padding(
-                  padding: const EdgeInsets.all(4.0),
-                  child: Image.network(
-                    item.logoUrl!,
-                    fit: BoxFit.contain,
-                    errorBuilder: (context, error, stackTrace) => Icon(
-                      item.fallbackIcon ?? Icons.signal_cellular_alt,
-                      color: Colors.grey.shade700,
-                    ),
-                  ),
-                )
-                    : Icon(
-                  item.fallbackIcon ?? Icons.signal_cellular_alt,
-                  color: Colors.grey.shade700,
-                ),
-              ),
-              title: Text(
-                item.operatorName,
-                style: const TextStyle(fontWeight: FontWeight.w600),
-              ),
-              subtitle: Text('Distributor: ${item.distributorRate.toStringAsFixed(2)}%'),
-              trailing: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                crossAxisAlignment: CrossAxisAlignment.end,
-                children: [
-                  const Text(
-                    'User rate',
-                    style: TextStyle(fontSize: 12, color: Colors.black54),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    // Show user rate exactly half of distributor rate
-                    '${item.userRate.toStringAsFixed(2)}%',
-                    style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                  ),
-                ],
-              ),
-            ),
-          );
-        },
-      ),
-    );
+  // Ezytm mapping kept (if you use it elsewhere)
+  static String? getEzytmOperatorId(String? appOperatorName) {
+    if (appOperatorName == null) return null;
+    final n = appOperatorName.trim().toUpperCase();
+    if (n == 'VI') return '23';
+    const m = {'AIRTEL':'2','BSNL':'5','JIO':'11'};
+    return m[n];
+  }
+  static String? getEzytmCircleId(String? appCircleName) {
+    if (appCircleName == null) return null;
+    final n = appCircleName.trim().toUpperCase();
+    const m = {
+      'ANDHRA PRADESH':'49','ASSAM':'56','BIHAR':'52','CHENNAI':'40','DELHI':'10','GUJARAT':'98','HARYANA':'96','HIMACHAL PRADESH':'03','JAMMU AND KASHMIR':'55','JHARKHAND':'105','KARNATAKA':'06','KERALA':'95','KOLKATA':'31','MADHYA PRADESH':'93','MAHARASHTRA':'90','MUMBAI':'92','NORTH EAST':'16','ORISSA':'53','PUNJAB':'02','RAJASTHAN':'70','TAMIL NADU':'94','TRIPURA':'100','UP EAST':'54','UP WEST':'97','WEST BENGAL':'51'
+    };
+    return m[n];
   }
 }

@@ -1,18 +1,23 @@
+// lib/pages/home_page.dart
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+
 import 'package:powerpay/pages/bank_page.dart';
 import 'package:powerpay/pages/recharge_page.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:powerpay/screens/user_management_page.dart';
 import 'package:powerpay/screens/monthly_report_page.dart';
 import 'package:powerpay/screens/commission_summary_page.dart';
 import 'package:powerpay/screens/pay_for_recharge_page.dart';
 
-import '../providers/wallet_provider.dart';
+import 'package:powerpay/providers/wallet_provider.dart';
+import 'package:powerpay/providers/distributor_provider.dart';
+import 'package:powerpay/providers/role_bootstrapper.dart'; // <-- if present in your project
 
-// --- Brand Colors ---
+/// --- Brand Colors ---
 const Color brandPurple = Color(0xFF5A189A);
 const Color brandBlue = Color(0xFF4F46E0);
 const Color brandPink = Color(0xFFE56EF2);
@@ -25,8 +30,19 @@ class HomePage extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final walletBalance = ref.watch(walletBalanceProvider);
-    final user = FirebaseAuth.instance.currentUser;
+    // Ensure roles/claims are bootstrapped (if you implemented this provider)
+    // If you don't have role_bootstrapper provider remove this line.
+    ref.watch(bootstrapRoleProvider);
+
+    // Watch the wallet balance stream provider
+    final walletBalanceAsync = ref.watch(walletBalanceProvider);
+
+    // Firebase user (for name/email)
+    final firebaseUser = FirebaseAuth.instance.currentUser;
+
+    // Distributor flags/data from your project providers (if present)
+    final isDistributor = ref.watch(isDistributorProvider);
+    final distributorData = ref.watch(distributorDataProvider);
 
     final services = [
       {"icon": Icons.phone_android, "label": "Mobile"},
@@ -41,7 +57,7 @@ class HomePage extends ConsumerWidget {
           children: [
             const SizedBox(height: 40),
 
-            // 🔹 Wallet Card
+            // Wallet Card
             Container(
               padding: const EdgeInsets.all(24),
               decoration: BoxDecoration(
@@ -75,11 +91,12 @@ class HomePage extends ConsumerWidget {
                           ),
                         ),
                         const SizedBox(height: 6),
-                        walletBalance.when(
+                        // Use .when to handle AsyncValue returned by provider
+                        walletBalanceAsync.when(
                           data: (balance) => AnimatedSwitcher(
                             duration: const Duration(milliseconds: 600),
                             child: Text(
-                              "₹${balance?.toStringAsFixed(2) ?? '0.00'}",
+                              "₹${balance.toStringAsFixed(2)}",
                               key: ValueKey(balance),
                               style: GoogleFonts.poppins(
                                 fontSize: 32,
@@ -88,11 +105,34 @@ class HomePage extends ConsumerWidget {
                               ),
                             ),
                           ),
-                          loading: () => const CircularProgressIndicator(
-                              strokeWidth: 3, color: Colors.white),
-                          error: (err, stack) => const Text("Error",
-                              style: TextStyle(color: Colors.redAccent)),
+                          loading: () => const SizedBox(
+                            height: 28,
+                            width: 28,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 3,
+                              color: Colors.white,
+                            ),
+                          ),
+                          error: (err, stack) {
+                            // Show a readable error and log it
+                            if (kDebugMode) {
+                              debugPrint('[HomePage] walletBalance error: $err');
+                            }
+                            return Text(
+                              "Error",
+                              style: TextStyle(color: Colors.redAccent, fontSize: 18),
+                            );
+                          },
                         ),
+                        const SizedBox(height: 10),
+                        if (firebaseUser?.email != null)
+                          Text(
+                            "Hello, ${distributorData?['name'] ?? firebaseUser!.email!}",
+                            style: GoogleFonts.poppins(
+                              color: Colors.white,
+                              fontSize: 14,
+                            ),
+                          ),
                       ],
                     ),
                   ),
@@ -121,8 +161,9 @@ class HomePage extends ConsumerWidget {
               ),
             ),
 
-            // ✅ DISTRIBUTOR ACTIONS SECTION - SMALL CIRCULAR BUTTONS
-            if (user?.email == 'grow@gmail.com')
+            // Distributor Actions — show only if the flag is true
+            const SizedBox(height: 8),
+            if (isDistributor)
               Padding(
                 padding: const EdgeInsets.only(top: 32.0),
                 child: Column(
@@ -136,6 +177,14 @@ class HomePage extends ConsumerWidget {
                         color: textDark,
                       ),
                     ),
+                    if (distributorData != null && distributorData['role'] != null)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 6.0),
+                        child: Text(
+                          "Role: ${distributorData['role']}",
+                          style: GoogleFonts.poppins(fontSize: 12, color: textLight),
+                        ),
+                      ),
                     const SizedBox(height: 20),
 
                     // Horizontal Scrollable Small Circular Buttons
@@ -145,7 +194,7 @@ class HomePage extends ConsumerWidget {
                         scrollDirection: Axis.horizontal,
                         children: [
                           const SizedBox(width: 4),
-                          
+
                           // Pay for User
                           _buildSmallActionButton(
                             title: 'Pay for User',
@@ -154,13 +203,15 @@ class HomePage extends ConsumerWidget {
                             onTap: () {
                               Navigator.push(
                                 context,
-                                MaterialPageRoute(builder: (_) => const PayForRechargePage()),
+                                MaterialPageRoute(
+                                  builder: (_) => const PayForRechargePage(),
+                                ),
                               );
                             },
                           ),
-                          
+
                           const SizedBox(width: 20),
-                          
+
                           // Users List
                           _buildSmallActionButton(
                             title: 'Users List',
@@ -169,13 +220,15 @@ class HomePage extends ConsumerWidget {
                             onTap: () {
                               Navigator.push(
                                 context,
-                                MaterialPageRoute(builder: (_) => const UserManagementPage()),
+                                MaterialPageRoute(
+                                  builder: (_) => const UserManagementPage(),
+                                ),
                               );
                             },
                           ),
-                          
+
                           const SizedBox(width: 20),
-                          
+
                           // Monthly Report
                           _buildSmallActionButton(
                             title: 'Monthly Report',
@@ -184,14 +237,16 @@ class HomePage extends ConsumerWidget {
                             onTap: () {
                               Navigator.push(
                                 context,
-                                MaterialPageRoute(builder: (_) => const MonthlyReportPage()),
+                                MaterialPageRoute(
+                                  builder: (_) => const CommissionSummaryPage(),
+                                ),
                               );
                             },
                           ),
-                          
+
                           const SizedBox(width: 20),
-                          
-                          // Commission
+
+                          // Commission (Distributor sees it here as before)
                           _buildSmallActionButton(
                             title: 'Commission',
                             icon: Icons.attach_money,
@@ -199,12 +254,61 @@ class HomePage extends ConsumerWidget {
                             onTap: () {
                               Navigator.push(
                                 context,
-                                MaterialPageRoute(builder: (_) => const CommissionSummaryPage()),
+                                MaterialPageRoute(
+                                  builder: (_) => const CommissionSummaryPage(),
+                                ),
                               );
                             },
                           ),
-                          
+
                           const SizedBox(width: 4),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              )
+            else
+            // If not a distributor, show a compact Account Actions row so regular users can access Commission
+              Padding(
+                padding: const EdgeInsets.only(top: 32.0),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      "Account Actions",
+                      style: GoogleFonts.poppins(
+                        fontSize: 20,
+                        fontWeight: FontWeight.w700,
+                        color: textDark,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    SizedBox(
+                      height: 100,
+                      child: ListView(
+                        scrollDirection: Axis.horizontal,
+                        children: [
+                          const SizedBox(width: 4),
+
+                          // Commission (available to regular users here)
+                          _buildSmallActionButton(
+                            title: 'Commission',
+                            icon: Icons.attach_money,
+                            color: brandPurple,
+                            onTap: () {
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (_) => const CommissionSummaryPage(),
+                                ),
+                              );
+                            },
+                          ),
+
+                          const SizedBox(width: 20),
+
+                          // You can add more user-specific action buttons here if needed
                         ],
                       ),
                     ),
@@ -214,7 +318,7 @@ class HomePage extends ConsumerWidget {
 
             const SizedBox(height: 32),
 
-            // 🔹 Services Grid
+            // Services Grid
             Text(
               "Quick Services",
               style: GoogleFonts.poppins(
@@ -266,8 +370,11 @@ class HomePage extends ConsumerWidget {
                             )
                           ],
                         ),
-                        child: Icon(item["icon"] as IconData,
-                            color: Colors.white, size: 26),
+                        child: Icon(
+                          item["icon"] as IconData,
+                          color: Colors.white,
+                          size: 26,
+                        ),
                       ),
                       const SizedBox(height: 6),
                       Text(

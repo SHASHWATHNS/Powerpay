@@ -1,62 +1,72 @@
+// lib/models/transaction_model.dart
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 class TransactionRecord {
+  final String id;
   final double amount;
+  final String type; // 'CREDIT' or 'DEBIT' or other
+  final String status; // e.g. 'success', 'failed', 'initiated'
+  final String operatorName; // operator or source label
+  final String number; // mobile number for recharge, or empty for others
   final DateTime createdAt;
-  final String description;
-  final String status; // 'success', 'failed', 'pending'
-  final String type; // DEBIT or CREDIT
-
-  // Extra fields (optional for UI)
-  final String operatorName;
-  final String number;
+  final Map<String, dynamic> raw;
 
   TransactionRecord({
+    required this.id,
     required this.amount,
-    required this.createdAt,
-    required this.description,
-    required this.status,
     required this.type,
-    this.operatorName = 'Wallet Top-up',
-    this.number = '',
+    required this.status,
+    required this.operatorName,
+    required this.number,
+    required this.createdAt,
+    required this.raw,
   });
 
-  factory TransactionRecord.fromFirestore(DocumentSnapshot doc) {
-    final data = doc.data() as Map<String, dynamic>;
-
-    // Defensive parsing
-    final rawAmount = (data['amount'] as num?) ?? 0;
-    final ts = data['createdAt'];
-    DateTime created;
-    if (ts is Timestamp) {
-      created = ts.toDate();
-    } else if (ts is DateTime) {
-      created = ts;
-    } else {
-      created = DateTime.now();
+  static DateTime _parseTimestamp(dynamic v) {
+    if (v == null) return DateTime.fromMillisecondsSinceEpoch(0);
+    if (v is Timestamp) return v.toDate();
+    if (v is DateTime) return v;
+    if (v is int) return DateTime.fromMillisecondsSinceEpoch(v);
+    if (v is String) {
+      try {
+        return DateTime.parse(v);
+      } catch (_) {
+        return DateTime.fromMillisecondsSinceEpoch(0);
+      }
     }
+    return DateTime.fromMillisecondsSinceEpoch(0);
+  }
 
-    String desc = (data['description'] ?? 'Transaction').toString();
-    String opName = (data['operatorName'] ?? 'Wallet Top-up').toString();
-    String numberVal = (data['number'] ?? '').toString();
+  factory TransactionRecord.fromMap(String id, Map<String, dynamic> data) {
+    final amount = (data['amount'] is num) ? (data['amount'] as num).toDouble()
+        : double.tryParse((data['amount'] ?? '0').toString()) ?? 0.0;
 
-    // Backward-compatible description parsing
-    if (desc.startsWith('Mobile Recharge for')) {
-      opName = 'Recharge';
-      final parts = desc.trim().split(' ');
-      if (parts.isNotEmpty) {
-        numberVal = parts.last;
+    // Determine type heuristically: for recharges we treat as DEBIT, wallet inflows as CREDIT
+    String type = (data['type'] ?? '').toString().toUpperCase();
+    if (type.isEmpty) {
+      // guess based on collection fields
+      if (data.containsKey('uid') && data.containsKey('mobile')) {
+        type = 'DEBIT';
+      } else {
+        type = (amount >= 0) ? 'CREDIT' : 'DEBIT';
       }
     }
 
+    final status = (data['status'] ?? data['state'] ?? 'initiated').toString().toLowerCase();
+    final operatorName = (data['operator'] ?? data['source'] ?? data['provider'] ?? '').toString();
+    final number = (data['mobile'] ?? data['number'] ?? '').toString();
+
+    final createdAt = _parseTimestamp(data['createdAt'] ?? data['timestamp'] ?? data['ts'] ?? data['server_time']);
+
     return TransactionRecord(
-      amount: rawAmount.abs().toDouble(), // display as positive
-      createdAt: created,
-      description: desc,
-      status: (data['status'] ?? 'success').toString(),
-      type: (data['type'] ?? 'UNKNOWN').toString(),
-      operatorName: opName,
-      number: numberVal,
+      id: id,
+      amount: amount,
+      type: type,
+      status: status,
+      operatorName: operatorName,
+      number: number,
+      createdAt: createdAt,
+      raw: Map<String, dynamic>.from(data),
     );
   }
 }

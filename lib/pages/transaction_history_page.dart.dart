@@ -1,17 +1,17 @@
+// lib/pages/transaction_history_page.dart
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
-import '../models/transaction_model.dart'; // Import the model
-import '../services/transaction_service.dart'; // Import the service
+import '../models/transaction_model.dart';
+import '../services/transaction_service.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 
-// --- CHANGED: Use ConsumerWidget for Riverpod integration ---
 class TransactionHistoryPage extends ConsumerWidget {
   const TransactionHistoryPage({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    // --- CHANGED: Get the service from the provider ---
-    final service = ref.watch(transactionServiceProvider);
+    final service = ref.watch(transactionServiceProvider as ProviderListenable);
     final numberFormat = NumberFormat.currency(locale: 'en_IN', symbol: '₹');
     final dateFormat = DateFormat('dd MMM yyyy • hh:mm a');
 
@@ -23,9 +23,27 @@ class TransactionHistoryPage extends ConsumerWidget {
           if (snapshot.connectionState == ConnectionState.waiting) {
             return const Center(child: CircularProgressIndicator());
           }
+
           if (snapshot.hasError) {
+            final err = snapshot.error;
+            if (err is FirebaseException && err.code == 'permission-denied') {
+              return Center(
+                child: Padding(
+                  padding: const EdgeInsets.all(20.0),
+                  child: Text(
+                    'Permission denied: your account does not have access to read transactions.\n\n'
+                        'Possible fixes:\n'
+                        '• Ensure you are signed in.\n'
+                        '• Ensure your Firestore rules are published (use the console) and documents include uid/participants fields.\n'
+                        '• Ensure distributors_by_uid exists for distributor accounts if you expect distributor access.',
+                    textAlign: TextAlign.center,
+                  ),
+                ),
+              );
+            }
             return Center(child: Text('Error: ${snapshot.error}'));
           }
+
           if (!snapshot.hasData || snapshot.data!.isEmpty) {
             return const Center(child: Text('No transactions yet.'));
           }
@@ -35,13 +53,9 @@ class TransactionHistoryPage extends ConsumerWidget {
           double successfulTotal = 0;
           double failedTotal = 0;
           for (final t in items) {
-            // Only consider debits (recharges) for this summary
             if (t.type == 'DEBIT') {
-              if (t.status == 'success') {
-                successfulTotal += t.amount;
-              } else if (t.status == 'failed') {
-                failedTotal += t.amount;
-              }
+              if (t.status == 'success') successfulTotal += t.amount;
+              else if (t.status == 'failed') failedTotal += t.amount;
             }
           }
 
@@ -91,7 +105,7 @@ class TransactionHistoryPage extends ConsumerWidget {
                             color: isCredit ? Colors.green.shade800 : Colors.indigo.shade800,
                           ),
                         ),
-                        title: Text(isCredit ? 'Wallet Top-up' : '${t.operatorName} • ${t.number}'),
+                        title: Text(isCredit ? 'Wallet Top-up' : '${t.operatorName.isNotEmpty ? t.operatorName : "Recharge"} • ${t.number.isNotEmpty ? t.number : ""}'),
                         subtitle: Text(dateFormat.format(t.createdAt)),
                         trailing: Column(
                           mainAxisAlignment: MainAxisAlignment.center,
@@ -106,7 +120,7 @@ class TransactionHistoryPage extends ConsumerWidget {
                               ),
                             ),
                             const SizedBox(height: 4),
-                            if (!isCredit) // Only show status for debits
+                            if (!isCredit)
                               Text(
                                 t.status.toUpperCase(),
                                 style: TextStyle(
@@ -119,6 +133,45 @@ class TransactionHistoryPage extends ConsumerWidget {
                               ),
                           ],
                         ),
+                        onTap: () {
+                          // Show details dialog
+                          showDialog<void>(
+                            context: context,
+                            builder: (ctx) => AlertDialog(
+                              title: Text(isCredit ? 'Wallet Top-up' : 'Transaction details'),
+                              content: SizedBox(
+                                width: double.maxFinite,
+                                child: SingleChildScrollView(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text('Amount: ${numberFormat.format(t.amount)}'),
+                                      const SizedBox(height: 8),
+                                      Text('Type: ${t.type}'),
+                                      const SizedBox(height: 8),
+                                      Text('Status: ${t.status}'),
+                                      const SizedBox(height: 8),
+                                      if (t.operatorName.isNotEmpty) Text('Operator: ${t.operatorName}'),
+                                      if (t.number.isNotEmpty) ...[
+                                        const SizedBox(height: 8),
+                                        Text('Number: ${t.number}'),
+                                      ],
+                                      const SizedBox(height: 8),
+                                      Text('Created: ${dateFormat.format(t.createdAt)}'),
+                                      const SizedBox(height: 8),
+                                      Text('Raw data (preview):'),
+                                      const SizedBox(height: 8),
+                                      Text(t.raw.toString(), style: const TextStyle(fontSize: 11)),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                              actions: [
+                                TextButton(onPressed: () => Navigator.of(ctx).pop(), child: const Text('Close')),
+                              ],
+                            ),
+                          );
+                        },
                       ),
                     );
                   },
@@ -132,7 +185,6 @@ class TransactionHistoryPage extends ConsumerWidget {
   }
 }
 
-// Helper widget for the summary card (No changes needed here)
 class _SummaryColumn extends StatelessWidget {
   const _SummaryColumn({
     required this.label,
