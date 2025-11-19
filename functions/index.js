@@ -5,6 +5,7 @@ const admin = require('firebase-admin');
 admin.initializeApp();
 
 // Helper: verify Authorization: Bearer <idToken>
+// Returns decoded token (with uid and custom claims) or throws (with .code property)
 async function verifyAdmin(req) {
   const authHeader = (req.get('Authorization') || req.get('authorization') || '');
   const parts = authHeader.split(' ');
@@ -16,6 +17,7 @@ async function verifyAdmin(req) {
   const idToken = parts[1];
   try {
     const decoded = await admin.auth().verifyIdToken(idToken);
+    // require admin claim
     if (!decoded.admin) {
       const err = new Error('Not an admin');
       err.code = 403;
@@ -30,19 +32,23 @@ async function verifyAdmin(req) {
   }
 }
 
+// ---------------------- HTTP: createUserByAdminHttp ----------------------
 // Create user endpoint (expects JSON body with email, password, name, ...)
+// Requires Authorization: Bearer <idToken> of a user with custom claim `admin: true`
 exports.createUserByAdminHttp = functions.https.onRequest(async (req, res) => {
-  if (req.method !== 'POST') return res.status(405).send({ error: 'Only POST' });
+  if (req.method !== 'POST') return res.status(405).send({ error: 'Only POST allowed' });
   try {
-    await verifyAdmin(req);
+    const decoded = await verifyAdmin(req); // will throw if not admin
+    const callerUid = decoded.uid;
 
     const body = req.body || {};
-    const { email, password, name, phoneNumber = '', address = '', panNumber = '', aadharNumber = '' } = body;
+    const { email, password, name, phoneNumber = '', address = '', panNumber = '', aadharNumber = '', commissionSlab } = body;
 
     if (!email || !password || !name) {
       return res.status(400).json({ error: 'Missing required fields: email, password, name' });
     }
 
+    // create user in Firebase Auth
     const userRecord = await admin.auth().createUser({
       email,
       password,
@@ -60,7 +66,14 @@ exports.createUserByAdminHttp = functions.https.onRequest(async (req, res) => {
       aadharNumber,
       createdAt: admin.firestore.FieldValue.serverTimestamp(),
       walletBalance: 0,
+      createdBy: callerUid, // set createdBy to the admin/distributor who called endpoint
+      backendCreatedBy: 'createUserByAdminHttp',
     };
+
+    if (commissionSlab !== undefined) {
+      const slabNum = Number(commissionSlab);
+      if (!isNaN(slabNum)) userDoc.commissionSlab = slabNum;
+    }
 
     await admin.firestore().collection('users').doc(uid).set(userDoc);
 
@@ -73,9 +86,9 @@ exports.createUserByAdminHttp = functions.https.onRequest(async (req, res) => {
   }
 });
 
-// Delete user endpoint (expects JSON body with uid)
+// ---------------------- HTTP: deleteUserByAdminHttp ----------------------
 exports.deleteUserByAdminHttp = functions.https.onRequest(async (req, res) => {
-  if (req.method !== 'POST') return res.status(405).send({ error: 'Only POST' });
+  if (req.method !== 'POST') return res.status(405).send({ error: 'Only POST allowed' });
   try {
     await verifyAdmin(req);
 
@@ -83,6 +96,7 @@ exports.deleteUserByAdminHttp = functions.https.onRequest(async (req, res) => {
     const { uid } = body;
     if (!uid) return res.status(400).json({ error: 'Missing required field: uid' });
 
+    // revoke sessions, delete auth user, delete Firestore doc
     await admin.auth().revokeRefreshTokens(uid);
     await admin.auth().deleteUser(uid);
     await admin.firestore().collection('users').doc(uid).delete();
@@ -99,13 +113,79 @@ exports.deleteUserByAdminHttp = functions.https.onRequest(async (req, res) => {
   }
 });
 
-/**
- * Callable function: transferWallet
- * - data: { toUserId: string, amount: number, toUserName?: string }
- * - checks caller is in distributors_by_uid
- * - updates walletBalance atomically (prefers users -> wallets -> distributors)
- * - writes wallet_transactions and distributor_payments logs
- */
+// ---------------------- Callable: updateUser ----------------------
+// Callable function to allow distributors (owner) or admins to update allowed fields.
+//
+// data: {
+//   uid: string,  // target user uid to update
+//   name?: string,
+//   phoneNumber?: string,
+//   address?: string,
+//   panNumber?: string,
+//   aadharNumber?: string,
+//   commissionSlab?: number|string
+// }
+// Caller must be authenticated. Update is allowed when:
+//  - caller is admin (custom claim `admin: true`) OR
+//  - caller is the same as users.{uid}.createdBy (i.e. distributor who created the retailer).
+exports.updateUser = functions.https.onCall(async (data, context) => {
+  try {
+    if (!context.auth) {
+      throw new functions.https.HttpsError('unauthenticated', 'User must be logged in.');
+    }
+
+    const callerUid = context.auth.uid;
+    const callerClaims = context.auth.token || {};
+    const isAdmin = !!callerClaims.admin;
+
+    const targetUid = (data && data.uid) ? String(data.uid) : '';
+    if (!targetUid) {
+      throw new functions.https.HttpsError('invalid-argument', 'Missing uid to update');
+    }
+
+    // Build updates map with allowed fields only
+    const updates = {};
+    if (typeof data.name === 'string') updates.name = data.name.trim();
+    if (typeof data.phoneNumber === 'string') updates.phoneNumber = data.phoneNumber.trim();
+    if (typeof data.address === 'string') updates.address = data.address.trim();
+    if (typeof data.panNumber === 'string') updates.panNumber = data.panNumber.trim().toUpperCase();
+    if (typeof data.aadharNumber === 'string') updates.aadharNumber = data.aadharNumber.trim();
+    if (data.commissionSlab !== undefined) {
+      const slab = Number(data.commissionSlab);
+      if (!isNaN(slab)) updates.commissionSlab = slab;
+    }
+
+    if (Object.keys(updates).length === 0) {
+      throw new functions.https.HttpsError('invalid-argument', 'No valid fields to update');
+    }
+
+    const userRef = admin.firestore().collection('users').doc(targetUid);
+    const doc = await userRef.get();
+    if (!doc.exists) {
+      throw new functions.https.HttpsError('not-found', 'Target user not found');
+    }
+
+    const docData = doc.data() || {};
+    const createdBy = docData.createdBy || null;
+
+    // Allow only admins or the distributor that created this user
+    if (!isAdmin && createdBy !== callerUid) {
+      throw new functions.https.HttpsError('permission-denied', 'You are not allowed to update this user');
+    }
+
+    updates.updatedAt = admin.firestore.FieldValue.serverTimestamp();
+    await userRef.update(updates);
+
+    return { success: true, updated: updates };
+  } catch (err) {
+    if (err instanceof functions.https.HttpsError) throw err;
+    console.error('updateUser error:', err);
+    throw new functions.https.HttpsError('internal', err && err.message ? err.message : String(err));
+  }
+});
+
+// ---------------------- Callable: transferWallet ----------------------
+// (Kept your original logic with small formatting/consistency adjustments)
 exports.transferWallet = functions.https.onCall(async (data, context) => {
   try {
     if (!context.auth) {

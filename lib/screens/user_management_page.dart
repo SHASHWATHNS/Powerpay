@@ -9,6 +9,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:http/http.dart' as http;
+import 'package:cloud_functions/cloud_functions.dart'; // << added
 
 import 'package:powerpay/providers/distributor_provider.dart';
 import 'package:powerpay/providers/role_bootstrapper.dart';
@@ -908,21 +909,27 @@ class _ViewUsersListState extends State<_ViewUsersList> {
                   if (!_editFormKey.currentState!.validate()) return;
                   setStateInner(() => _isSaving = true);
                   try {
-                    // Update Firestore user doc
-                    await FirebaseFirestore.instance.collection('users').doc(user.uid).update({
+                    // Use callable Cloud Function 'updateUser' instead of client-side Firestore update.
+                    final callable = FirebaseFunctions.instance.httpsCallable('updateUser');
+                    final result = await callable.call(<String, dynamic>{
+                      'uid': user.uid,
                       'name': nameCtrl.text.trim(),
                       'phoneNumber': phoneCtrl.text.trim(),
                       'address': addressCtrl.text.trim(),
                       'panNumber': panCtrl.text.trim().toUpperCase(),
                       'aadharNumber': aadharCtrl.text.trim(),
                       'commissionSlab': _selectedCommission,
-                      'updatedAt': FieldValue.serverTimestamp(),
                     });
+
                     if (!mounted) return;
                     Navigator.of(ctx).pop();
                     ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('User updated successfully'), backgroundColor: Colors.green));
+                  } on FirebaseFunctionsException catch (e) {
+                    debugPrint('CloudFunctions error: ${e.code} ${e.message}');
+                    if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed to update: ${e.message}'), backgroundColor: Colors.red));
+                    setStateInner(() => _isSaving = false);
                   } catch (e) {
-                    debugPrint('Error updating user: $e');
+                    debugPrint('Unexpected update error: $e');
                     if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed to update: $e'), backgroundColor: Colors.red));
                     setStateInner(() => _isSaving = false);
                   }
