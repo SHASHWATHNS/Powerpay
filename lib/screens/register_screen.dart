@@ -289,8 +289,8 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> with WidgetsBin
       final priceLabel = isDistributor ? '₹1099' : '₹599';
       final roleLabel = isDistributor ? 'Distributor' : 'User';
       final paymentUrl = isDistributor
-          ? 'https://pg.qpayindia.com/WWWS/Merchant/PaymentLinkoptions/PaymentURLLink.aspx?id=923'
-          : 'https://pg.qpayindia.com/WWWS/Merchant/PaymentLinkoptions/PaymentURLLink.aspx?id=923';
+          ? 'https://pg.qpayindia.com/WWWS/Merchant/PaymentLinkoptions/PaymentURLLink.aspx?id=896'
+          : 'https://pg.qpayindia.com/WWWS/Merchant/PaymentLinkoptions/PaymentURLLink.aspx?id=899';
 
       final dialogChoice = await showDialog<String>(
         context: context,

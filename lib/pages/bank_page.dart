@@ -1,13 +1,14 @@
 // lib/screens/bank_page.dart
 import 'dart:async';
 import 'dart:convert';
-
+import 'package:android_intent_plus/android_intent.dart';
+import 'package:flutter/services.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'package:powerpay/screens/payment_success_page.dart';
 import 'package:uuid/uuid.dart';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:url_launcher/url_launcher.dart';
 import 'package:http/http.dart' as http;
 import 'package:firebase_auth/firebase_auth.dart';
 
@@ -112,14 +113,157 @@ class _BankPageState extends ConsumerState<BankPage> with WidgetsBindingObserver
     }
   }
 
+  Future<void> _launchUpiPayment(String upiUrl, {required String fallbackDetails}) async {
+    final uri = Uri.parse(upiUrl);
+    debugPrint('[BankPage] trying upi uri: $upiUrl');
+
+    // 1) Try generic upi:// handler
+    try {
+      final can = await canLaunchUrl(uri);
+      debugPrint('[BankPage] canLaunchUrl: $can');
+      if (can) {
+        await launchUrl(uri, mode: LaunchMode.externalApplication);
+        return;
+      }
+    } catch (e) {
+      debugPrint('[BankPage] url_launcher generic failed: $e');
+    }
+
+    // 2) Try per-package intent:// fallback (uses url_launcher only)
+    final packages = <String>[
+      'com.google.android.apps.nbu.paisa.user', // GPay
+      'com.phonepe.app',                        // PhonePe
+      'net.one97.paytm',                        // Paytm
+      'in.org.npci.upiapp',                     // BHIM / NPCI
+      'com.whatsapp',                           // WhatsApp UPI
+    ];
+
+    for (final pkg in packages) {
+      try {
+        final intentStr = upiUrl.replaceFirst('upi://', 'intent://') + '#Intent;package=$pkg;scheme=upi;end';
+        final intentUri = Uri.parse(intentStr);
+        debugPrint('[BankPage] trying intent for $pkg -> $intentStr');
+        if (await canLaunchUrl(intentUri)) {
+          await launchUrl(intentUri, mode: LaunchMode.externalApplication);
+          return;
+        }
+      } catch (e) {
+        debugPrint('[BankPage] intent:// for $pkg failed: $e');
+      }
+    }
+
+    // 3) Try a generic intent:// with no package (some devices accept this)
+    try {
+      final genericIntent = upiUrl.replaceFirst('upi://', 'intent://') + '#Intent;scheme=upi;end';
+      final genericUri = Uri.parse(genericIntent);
+      debugPrint('[BankPage] trying generic intent:// -> $genericIntent');
+      if (await canLaunchUrl(genericUri)) {
+        await launchUrl(genericUri, mode: LaunchMode.externalApplication);
+        return;
+      }
+    } catch (e) {
+      debugPrint('[BankPage] generic intent:// failed: $e');
+    }
+
+    // 4) Final fallback -> show dialog with copy / web gateway
+    if (!mounted) throw Exception('Could not launch payment URL');
+
+    showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('Open UPI app'),
+        content: Text(
+          'Could not open a UPI app automatically.\n\nYou can copy the details and paste them into any UPI app, or open the web payment gateway.\n\n$fallbackDetails',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () async {
+              await Clipboard.setData(ClipboardData(text: fallbackDetails));
+              if (mounted) {
+                Navigator.of(context).pop();
+                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Copied UPI details')));
+              }
+            },
+            child: const Text('Copy details'),
+          ),
+          TextButton(
+            onPressed: () {
+              Navigator.of(context).pop();
+              final fallbackWeb = Uri.parse('https://pg.qpayindia.com/WWWS/Merchant/PaymentLinkoptions/PaymentURLLink.aspx');
+              launchUrl(fallbackWeb, mode: LaunchMode.externalApplication);
+            },
+            child: const Text('Open web gateway'),
+          ),
+          TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Cancel')),
+        ],
+      ),
+    );
+
+    throw Exception('Could not launch payment URL');
+  }
+
   Future<void> _launchPaymentUrl(String paymentUrl) async {
     final uri = Uri.parse(paymentUrl);
 
-    if (await canLaunchUrl(uri)) {
-      await launchUrl(uri, mode: LaunchMode.externalApplication);
-    } else {
-      throw Exception('Could not launch payment URL');
+    // 1) Try url_launcher first (preferred)
+    try {
+      if (await canLaunchUrl(uri)) {
+        await launchUrl(uri, mode: LaunchMode.externalApplication);
+        return;
+      }
+    } catch (e) {
+      debugPrint('url_launcher primary fail: $e');
     }
+
+    // 2) Try launching common UPI app packages (Android only)
+    final packages = <String>[
+      'com.google.android.apps.nbu.paisa.user', // GPay
+      'com.phonepe.app',                        // PhonePe
+      'com.mobikwik_new',                       // Mobikwik (if used)
+      'in.org.npci.upiapp',                     // BHIM / NPCI generic
+      'com.amazon.mShop.android.shopping',      // example (not UPI) - optional
+    ];
+
+    for (final pkg in packages) {
+      try {
+        final intent = AndroidIntent(
+          action: 'action_view',
+          data: paymentUrl,
+          package: pkg,
+        );
+        final can = await intent.canResolveActivity();
+        if (can == true) {
+          await intent.launch();
+          return;
+        }
+      } on PlatformException catch (e) {
+        debugPrint('intent error for $pkg: $e');
+      } catch (e) {
+        debugPrint('intent generic error for $pkg: $e');
+      }
+    }
+
+    // 3) Try raw intent:// fallback (works for many Android devices)
+    try {
+      final intentUri = paymentUrl.replaceFirst('upi://', 'intent://');
+      // append Intent terminator if not present
+      final full = intentUri + '#Intent;scheme=upi;end';
+      final parsed = Uri.parse(full);
+      if (await canLaunchUrl(parsed)) {
+        await launchUrl(parsed, mode: LaunchMode.externalApplication);
+        return;
+      }
+    } catch (e) {
+      debugPrint('intent:// fallback failed: $e');
+    }
+
+    // 4) Final fail -> show user-friendly message
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No UPI app available to handle payment.')),
+      );
+    }
+    throw Exception('Could not launch payment URL');
   }
 
   /// Verify payments - with option to be silent (no messages for "no updates")
@@ -273,9 +417,28 @@ class _BankPageState extends ConsumerState<BankPage> with WidgetsBindingObserver
     }
   }
 
-  /// Start payment: Record pending payment and enable verification on return
-  /// This version will still open the payment page even if recording times out.
-  Future<void> _startQPayPaymentForSelectedPlan() async {
+  Future<bool> _tryLaunchWithPackages(String upiUrl, List<String> packages) async {
+    for (final pkg in packages) {
+      try {
+        final intent = AndroidIntent(
+          action: 'action_view',
+          data: upiUrl,
+          package: pkg,
+        );
+        final can = await intent.canResolveActivity();
+        debugPrint('[BankPage] canResolveActivity($pkg): $can');
+        if (can == true) {
+          await intent.launch();
+          return true;
+        }
+      } catch (e) {
+        debugPrint('[BankPage] intent error for $pkg: $e');
+      }
+    }
+    return false;
+  }
+
+  Future<void> _startUpiPaymentForSelectedPlan() async {
     final loading = ref.read(bankPageLoadingProvider.notifier);
     loading.state = true;
 
@@ -287,87 +450,71 @@ class _BankPageState extends ConsumerState<BankPage> with WidgetsBindingObserver
       final uid = user.uid;
       final email = user.email ?? '';
 
-      // Generate providerTxnId here (unique per payment)
+      // Create providerTxnId (unique)
       final providerTxnId = _uuid.v4();
-
-      // Save locally so we can verify only this txn on resume (optional)
       _lastProviderTxnId = providerTxnId;
       _paymentStarted = true;
-
-      // Store pending amount so PaymentSuccessPage can show it
       _pendingAmount = plan.amount;
 
-      Map<String, dynamic>? recordResult;
-      bool recordSucceeded = false;
-
+      // Try to create server-side pending record (best effort). If times out, proceed anyway.
       try {
-        // Try recording the payment (but if it times out we'll proceed anyway)
-        recordResult = await _callWalletApiRecord(
+        await _callWalletApiRecord(
           uid: uid,
           amount: plan.amount,
           providerTxnId: providerTxnId,
           email: email,
         );
-        recordSucceeded = recordResult['success'] == true;
-      } on TimeoutException catch (_) {
-        // TIMEOUT: proceed to payment but notify user and log
-        debugPrint('[BankPage] record timed out — proceeding to open payment page');
+        // we ignore returned success here; admin will confirm later
+      } catch (e) {
+        debugPrint('[BankPage] record attempt failed (proceeding): $e');
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
-              content: Text('Network slow: starting payment. Verification may occur after return.'),
+              content: Text('Could not register payment with server. Proceeding to UPI app.'),
               backgroundColor: Colors.orange,
             ),
           );
         }
-        // recordSucceeded remains false; we'll auto-verify on resume
-      } catch (e) {
-        // Non-timeout error — show warning but still proceed to payment
-        debugPrint('[BankPage] record failed: $e. Proceeding to payment.');
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Could not create record: $e'), backgroundColor: Colors.orange),
-          );
-        }
       }
 
-      // Build QPay payment URL safely using Uri.replace(queryParameters:)
-      final encodedProvider = Uri.encodeComponent(providerTxnId);
-      final encodedUid = Uri.encodeComponent(uid);
-      final returnUrl = 'https://projects.growtechnologies.in/powerpay/wallet_payment.php?providerTxnId=$encodedProvider&uid=$encodedUid';
+      // -- Build UPI URI --
+      // IMPORTANT: replace these with your merchant/payee details
+      const payeeVpa = 'surendaranandp@naviaxis';         // merchant VPA or receiver VPA (example)
+      const payeeName = 'billa';            // receiver name shown in UPI app
+      final amountStr = plan.amount.toStringAsFixed(2); // if your plans are in paise; else use plan.amount.toStringAsFixed(2)
+      // If plan.amount is rupees already, use: final amountStr = plan.amount.toString();
 
-      final paymentUri = Uri.parse('https://pg.qpayindia.com/WWWS/Merchant/PaymentLinkoptions/PaymentURLLink.aspx').replace(
+      // Include providerTxnId and uid in 'tn' (txn note) or 'merchantRef'
+      final txnNote = 'Topup | uid:$uid | tx:$providerTxnId';
+
+      final upiUri = Uri(
+        scheme: 'upi',
+        host: 'pay',
         queryParameters: {
-          'id': plan.id.toString(),
-          'merchant_ref': providerTxnId,
-          'custom_uid': uid,
-          'providerTxnId': providerTxnId,
-          'amount': plan.amount.toString(),
-          'return_url': returnUrl,
+          'pa': payeeVpa,
+          'pn': payeeName,
+          'am': amountStr,
+          'cu': 'INR',
+          'tn': txnNote,
+          // optional:
+          // 'mc': '<merchant_code>',
+          // 'tr': providerTxnId, // some apps read 'tr' or 'tid' fields
         },
       );
 
-      final paymentLink = paymentUri.toString();
+      final upiUrl = upiUri.toString(); // e.g. upi://pay?pa=...&pn=...&am=...&tn=...
 
-      debugPrint('[BankPage] Starting payment: $providerTxnId -> $paymentLink');
+      debugPrint('[BankPage] Launching UPI: $upiUrl');
 
-      // set flag so resume flow triggers verification
-      _shouldVerifyOnResume = true;
-
-      await _launchPaymentUrl(paymentLink);
+      _shouldVerifyOnResume = true; // so when user returns we verify pending txns
+      await _launchPaymentUrl(upiUrl);
     } catch (e) {
-      debugPrint('[BankPage] Payment error: $e');
-      // Clear the flag on error
+      debugPrint('[BankPage] UPI Payment error: $e');
       _shouldVerifyOnResume = false;
       _paymentStarted = false;
       _pendingAmount = null;
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Payment Error: $e'),
-            backgroundColor: Colors.red,
-          ),
-        );
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Payment Error: $e')));
       }
     } finally {
       if (mounted) loading.state = false;
@@ -491,15 +638,15 @@ class _BankPageState extends ConsumerState<BankPage> with WidgetsBindingObserver
     return Scaffold(
       appBar: AppBar(
         title: const Text('Add Money to Wallet'),
-        actions: [
-          IconButton(
-            tooltip: 'Refresh & Verify',
-            onPressed: isLoading ? null : () => _verifyPendingTopupsAndRefresh(),
-            icon: isLoading
-                ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
-                : const Icon(Icons.refresh),
-          ),
-        ],
+        // actions: [
+        //   IconButton(
+        //     tooltip: 'Refresh & Verify',
+        //     onPressed: isLoading ? null : () => _verifyPendingTopupsAndRefresh(),
+        //     icon: isLoading
+        //         ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
+        //         : const Icon(Icons.refresh),
+        //   ),
+        // ],
       ),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(16.0),
@@ -521,12 +668,12 @@ class _BankPageState extends ConsumerState<BankPage> with WidgetsBindingObserver
                     ),
                     SizedBox(height: 8),
                     Text(
-                      '1. Select plan and tap "Pay"\n'
-                          '2. Complete payment in browser\n'
-                          '3. Return to app manually\n'
+                      '1. Decide which plan you want\n'
+                          '2. Conatct the admin and notify them\n'
+                          '3. Pay to the UPI listed below\n'
                           '4. Wallet updates automatically\n'
                           '5. Use refresh button if needed',
-                      textAlign: TextAlign.center,
+                      textAlign: TextAlign.left,
                       style: TextStyle(fontSize: 12),
                     ),
                   ],
@@ -583,26 +730,33 @@ class _BankPageState extends ConsumerState<BankPage> with WidgetsBindingObserver
                           ),
                         ),
                         const SizedBox(width: 10),
-                        ElevatedButton(
-                          onPressed: isLoading ? null : () => _startQPayPaymentForSelectedPlan(),
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: Colors.purple,
-                            foregroundColor: Colors.white,
-                          ),
-                          child: isLoading
-                              ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
-                              : Text('Pay ₹${plan.amount}'),
-                        ),
+                        // ElevatedButton(
+                        //   onPressed: isLoading ? null : () => _startUpiPaymentForSelectedPlan(),
+                        //   style: ElevatedButton.styleFrom(
+                        //     backgroundColor: Colors.purple,
+                        //     foregroundColor: Colors.white,
+                        //   ),
+                        //   child: isLoading
+                        //       ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
+                        //       : Text('Pay ₹${plan.amount}'),
+                        // ),
                       ],
                     ),
                   ),
                 ),
               );
             }).toList(),
+            const SizedBox(width: 10),
+            Text(
+              'ADMIN: +91 93605 59979\n' 'UPI ID: zealous.vinoth-1@okhdfcbank',
+              textAlign: TextAlign.center,
+              style: TextStyle(fontSize: 20),
+            ),
           ],
         ),
       ),
     );
+
   }
 }
 
